@@ -7,6 +7,7 @@ import { useGridState } from './hooks/useGridState';
 import { collectLayerFilledPoints } from './hooks/layerState';
 import type { AlgorithmMode, ColorPalette as ColorPaletteType, Color, DrawMode, MirrorMode } from './types';
 import mardPalette from './data/colorCards/mard.json';
+import { getImportImageSizeError, isImportImageSizeValid } from './utils/importImage';
 
 const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle']);
 const DRAW_MODE_LABELS: Record<DrawMode, string> = {
@@ -214,6 +215,12 @@ function App() {
   const handleImportFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
+      return;
+    }
+
+    if (!isImportImageSizeValid(file)) {
+      window.alert(getImportImageSizeError(file));
+      event.target.value = '';
       return;
     }
 
@@ -612,7 +619,7 @@ function App() {
                   </p>
                 </div>
 
-                <ExportPanel gridState={composedGridState} overlayImage={overlayImage} compact />
+                <ExportPanel gridState={composedGridState} compact />
               </div>
             ) : (
               <div className="space-y-3">

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AlgorithmMode, Color, GridConfig, GridCell } from '../../types';
 import { estimateRecommendedColorLimit, processImageToGrid } from '../../algorithms/kMeans';
 import { expandBounds, findOpaqueBounds, removeConnectedWhiteBackground } from '../../utils/imageProcessing';
+import { getImportImageSizeError, isImportImageSizeValid } from '../../utils/importImage';
 
 interface ImageProcessorProps {
   palette: Color[] | null;
@@ -292,6 +293,11 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   }, [cropRect, fitToSubject, image]);
 
   const loadImageFile = useCallback((file: File) => {
+    if (!isImportImageSizeValid(file)) {
+      window.alert(getImportImageSizeError(file));
+      return;
+    }
+
     setIsLoadingImage(true);
     const reader = new FileReader();
     reader.onerror = () => {

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Color, DrawMode, GridState } from '../../types';
-import { buildColorCodeMap } from '../../utils/pattern';
-import { clampZoom, stepZoom } from '../../utils/gridZoom';
+import { buildColorLabelMap } from '../../utils/pattern';
+import { clampZoom, computeAnchoredScrollOffset, shouldStartViewportPanning, stepZoom } from '../../utils/gridZoom';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
 
 export type EditorViewMode = 'color' | 'number' | 'overlay';
@@ -161,7 +161,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-  const colorCodeMap = useMemo(() => buildColorCodeMap(gridState.cells), [gridState.cells]);
+  const colorLabelMap = useMemo(() => buildColorLabelMap(gridState.cells), [gridState.cells]);
   const previewKeySet = useMemo(
     () => new Set(previewPoints.map((point) => `${point.x},${point.y}`)),
     [previewPoints],
@@ -188,7 +188,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const zoom = manualZoom ?? fitZoom;
   // Use floor + lower min bound so fit-zoom can truly fit small viewports.
   const cellSize = Math.max(4, Math.floor(BASE_CELL_SIZE * zoom));
+  const { width, height } = gridState.config;
   const gutter = viewMode === 'color' ? 0 : Math.max(24, Math.floor(cellSize * 1.5));
+  const canvasWidth = gutter + (width * cellSize) + 1;
+  const canvasHeight = gutter + (height * cellSize) + 1;
   const strokeWidth = zoom >= 1.4 ? 1 : 0.7;
 
   useEffect(() => {
@@ -247,10 +250,6 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       return;
     }
 
-    const { width, height } = gridState.config;
-    const canvasWidth = gutter + (width * cellSize) + 1;
-    const canvasHeight = gutter + (height * cellSize) + 1;
-
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
@@ -280,14 +279,15 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             ctx.fillRect(px, py, cellSize, cellSize);
           } else if (viewMode === 'number') {
             if (cell) {
-              const code = colorCodeMap.get(cell.hex) ?? 0;
+              const codeLabel = colorLabelMap.get(cell.hex) ?? 'C1';
               const cellStyle = getPatternNumberCellStyle(cell.hex);
               const labelStyle = getPatternCellTextStyle('number', cellSize);
+              const fontSize = codeLabel.length >= 3 ? Math.max(8, labelStyle.fontSize - 2) : labelStyle.fontSize;
               ctx.fillStyle = cellStyle.fillColor;
               ctx.fillRect(px, py, cellSize, cellSize);
               ctx.fillStyle = cellStyle.textColor;
-              ctx.font = `700 ${labelStyle.fontSize}px sans-serif`;
-              ctx.fillText(String(code), px + (cellSize / 2), py + (cellSize / 2));
+              ctx.font = `700 ${fontSize}px sans-serif`;
+              ctx.fillText(codeLabel, px + (cellSize / 2), py + (cellSize / 2));
             } else {
               ctx.fillStyle = '#ffffff';
               ctx.fillRect(px, py, cellSize, cellSize);
@@ -300,11 +300,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             ctx.restore();
 
             if (zoom >= 1.1) {
-              const code = colorCodeMap.get(cell.hex) ?? 0;
+              const codeLabel = colorLabelMap.get(cell.hex) ?? 'C1';
               const labelStyle = getPatternCellTextStyle('overlay', cellSize);
+              const fontSize = codeLabel.length >= 3 ? Math.max(7, labelStyle.fontSize - 1) : labelStyle.fontSize;
               ctx.fillStyle = labelStyle.textColor;
-              ctx.font = `700 ${labelStyle.fontSize}px sans-serif`;
-              ctx.fillText(String(code), px + (cellSize / 2), py + (cellSize / 2));
+              ctx.font = `700 ${fontSize}px sans-serif`;
+              ctx.fillText(codeLabel, px + (cellSize / 2), py + (cellSize / 2));
             }
           }
 
@@ -433,7 +434,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     paintCells();
     drawHoveredLayer();
     drawPreview();
-  }, [cellSize, colorCodeMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, strokeWidth, viewMode, zoom]);
+  }, [cellSize, colorLabelMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, strokeWidth, viewMode, zoom]);
 
   const getGridPosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -454,6 +455,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (shouldStartViewportPanning({ button: e.button, isSpacePressed: spacePressedRef.current })) {
+      return;
+    }
+
     const { x, y } = getGridPosition(e);
     if (x < 0 || x >= gridState.config.width || y < 0 || y >= gridState.config.height) {
       return;
@@ -471,6 +476,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (panStartRef.current) {
+      return;
+    }
+
     const { x, y } = getGridPosition(e);
     if (x >= 0 && x < gridState.config.width && y >= 0 && y < gridState.config.height) {
       onCellMouseEnter(x, y);
@@ -504,14 +513,37 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     const rect = viewport.getBoundingClientRect();
     const cursorOffsetX = event.clientX - rect.left;
     const cursorOffsetY = event.clientY - rect.top;
-    const pointerX = viewport.scrollLeft + cursorOffsetX;
-    const pointerY = viewport.scrollTop + cursorOffsetY;
-    const ratio = nextZoom / previousZoom;
+    const nextCellSize = Math.max(4, Math.floor(BASE_CELL_SIZE * nextZoom));
+    const nextGutter = viewMode === 'color' ? 0 : Math.max(24, Math.floor(nextCellSize * 1.5));
+    const nextCanvasWidth = nextGutter + (width * nextCellSize) + 1;
+    const nextCanvasHeight = nextGutter + (height * nextCellSize) + 1;
+    const nextScrollLeft = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientWidth,
+      cursorOffset: cursorOffsetX,
+      scrollOffset: viewport.scrollLeft,
+      previousCanvasSize: canvasWidth,
+      nextCanvasSize: nextCanvasWidth,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
+    const nextScrollTop = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientHeight,
+      cursorOffset: cursorOffsetY,
+      scrollOffset: viewport.scrollTop,
+      previousCanvasSize: canvasHeight,
+      nextCanvasSize: nextCanvasHeight,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
 
     setManualZoom(nextZoom);
     requestAnimationFrame(() => {
-      viewport.scrollLeft = (pointerX * ratio) - cursorOffsetX;
-      viewport.scrollTop = (pointerY * ratio) - cursorOffsetY;
+      viewport.scrollLeft = nextScrollLeft;
+      viewport.scrollTop = nextScrollTop;
     });
   };
 
@@ -521,7 +553,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       return;
     }
 
-    const shouldPan = event.button === 1 || spacePressedRef.current;
+    const shouldPan = shouldStartViewportPanning({
+      button: event.button,
+      isSpacePressed: spacePressedRef.current,
+    });
     if (!shouldPan) {
       return;
     }
@@ -575,12 +610,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           className="h-full min-h-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
           style={{ scrollbarGutter: 'stable both-edges' }}
         >
-          <div className="flex min-h-full min-w-full items-center justify-center">
+          <div className="flex min-h-full min-w-full">
             <canvas
               ref={canvasRef}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
-              className="block shrink-0 rounded-2xl border border-[#dbc8b0] bg-white"
+              className="block m-auto shrink-0 rounded-2xl border border-[#dbc8b0] bg-white"
               style={{ imageRendering: 'pixelated', cursor: canvasCursor }}
             />
           </div>
@@ -608,8 +643,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         </div>
       </div>
       <div className="grid gap-2 rounded-[22px] border border-[#eadfd0] bg-[#faf6ef]/96 px-3 py-2.5 backdrop-blur-sm">
-        <div className="overflow-x-auto overflow-y-visible no-scrollbar">
-          <div className="flex w-max items-center gap-2 pr-1 overflow-y-visible">
+        <div className="-mb-6 overflow-x-auto pb-6 no-scrollbar">
+          <div className="flex w-max items-center gap-2 pr-1">
             {TOOL_GROUPS.map((group) => (
               <div key={group.id} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-[#eadfd0] bg-white/70 px-1.5 py-1">
                 <span className="rounded-md bg-[#f4efe5] px-1.5 py-0.5 text-[9px] font-black tracking-[0.08em] text-gray-500">
@@ -627,7 +662,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                     }`}
                   >
                     {tool.icon(drawMode === tool.mode)}
-                    <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                       {tool.label}
                     </span>
                   </button>
@@ -638,20 +673,26 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         </div>
 
         <div className="border-t border-[#eadfd0] pt-2">
-          <div className="min-w-0 whitespace-nowrap text-[10px] font-medium text-gray-500">
-            提示：
-            <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Ctrl/⌘ + 滚轮</kbd>
-            缩放，
-            <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">双指滚动</kbd>
-            平移，
-            <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Space + 拖拽</kbd>
-            平移，
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 whitespace-nowrap text-[10px] font-medium text-gray-500">
+              提示：
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Ctrl/⌘ + 滚轮</kbd>
+              缩放，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">双指滚动</kbd>
+              平移，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Space + 拖拽</kbd>
+              平移
+            </div>
             <button
               type="button"
+              aria-label="适应窗口"
               onClick={() => setManualZoom(null)}
-              className="ml-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 transition hover:bg-gray-50"
+              className="inline-flex items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
             >
-              适应窗口
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[9px] leading-none text-[#dd6b20]">
+                ⤢
+              </span>
+              <span>重置视图</span>
             </button>
           </div>
         </div>

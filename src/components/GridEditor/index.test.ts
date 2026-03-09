@@ -18,7 +18,7 @@ const gridState: GridState = {
 };
 
 describe('GridEditor', () => {
-  it('centers the canvas stage without allowing the canvas to shrink in flex layout', () => {
+  it('centers small canvases with auto margins instead of justify-center so enlarged stages remain fully scrollable', () => {
     const html = renderToStaticMarkup(
       React.createElement(GridEditor, {
         gridState,
@@ -37,9 +37,59 @@ describe('GridEditor', () => {
       }),
     );
 
-    expect(html).toContain('flex min-h-full min-w-full items-center justify-center');
-    expect(html).toContain('shrink-0 rounded-2xl');
+    expect(html).toContain('flex min-h-full min-w-full"><canvas class="block m-auto shrink-0 rounded-2xl');
+    expect(html).toContain('block m-auto shrink-0 rounded-2xl');
     expect(html).toContain('pointer-events-none absolute bottom-3 right-3 z-20');
-    expect(html).not.toContain('grid grid-cols-[minmax(0,1fr)_auto]');
+    expect(html).not.toContain('flex min-h-full min-w-full items-center justify-center');
+  });
+
+  it('reserves tooltip space inside the horizontal tool scroller instead of relying on overflow-y-visible', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('-mb-6 overflow-x-auto pb-6 no-scrollbar');
+    expect(html).toContain('pb-6');
+    expect(html).toContain('z-40');
+    expect(html).not.toContain('overflow-y-visible');
+  });
+
+  it('renders reset zoom as a standalone action pill instead of inline hint text styling', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="适应窗口"');
+    expect(html).toContain('inline-flex items-center gap-1 rounded-full');
+    expect(html).toContain('重置视图');
+    expect(html).not.toContain('ml-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px]');
   });
 });

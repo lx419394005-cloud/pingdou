@@ -1,13 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GridState } from '../../types';
-import { buildColorCodeMap, buildIndexedPalette } from '../../utils/pattern';
+import { buildColorLabelMap, buildIndexedPalette, getDisplayCode } from '../../utils/pattern';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
 
 interface ExportPanelProps {
   gridState: GridState;
-  overlayImage: string | null;
   compact?: boolean;
 }
+type ExportMode = 'color' | 'number';
 
 const CELL_SIZE = 24;
 const HEADER_HEIGHT = 92;
@@ -30,21 +30,18 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 };
 
-const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-  const image = new Image();
-  image.onload = () => resolve(image);
-  image.onerror = reject;
-  image.src = src;
-});
-
-export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImage, compact = false }) => {
+export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = false }) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const previewRequestRef = useRef(0);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<ExportMode>('number');
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const indexedPalette = useMemo(() => buildIndexedPalette(gridState.cells), [gridState.cells]);
-  const colorCodeMap = useMemo(() => buildColorCodeMap(gridState.cells), [gridState.cells]);
+  const colorLabelMap = useMemo(() => buildColorLabelMap(gridState.cells), [gridState.cells]);
   const totalBeans = indexedPalette.reduce((sum, entry) => sum + entry.count, 0);
 
-  const drawPatternSheet = async (mode: 'color' | 'number' | 'overlay') => {
+  const drawPatternSheet = useCallback(async (mode: ExportMode) => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return null;
@@ -74,19 +71,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
     ctx.font = '600 13px sans-serif';
     ctx.fillStyle = '#6b7280';
     ctx.fillText(`尺寸 ${width} × ${height} | 总豆数 ${totalBeans} | 颜色数 ${indexedPalette.length}`, PADDING, 62);
-    ctx.fillText(`导出模式：${mode === 'color' ? '像素图纸' : mode === 'number' ? '标号图纸' : '临摹图纸'}`, PADDING, 82);
+    ctx.fillText(`导出模式：${mode === 'color' ? '像素图纸' : '标号图纸'}`, PADDING, 82);
 
     const gridX = PADDING + GUTTER;
     const gridY = HEADER_HEIGHT + GUTTER;
-
-    if (mode === 'overlay' && overlayImage) {
-      const overlayBitmap = await loadImage(overlayImage);
-      ctx.save();
-      ctx.globalAlpha = 0.36;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(overlayBitmap, gridX, gridY, gridWidth, gridHeight);
-      ctx.restore();
-    }
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -118,25 +106,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
           ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
         } else {
           if (cell) {
-            if (mode === 'overlay') {
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
-              ctx.save();
-              ctx.globalAlpha = 0.32;
-              ctx.fillStyle = cell.hex;
-              ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
-              ctx.restore();
-            } else {
-              const cellStyle = getPatternNumberCellStyle(cell.hex);
-              ctx.fillStyle = cellStyle.fillColor;
-              ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
-            }
+            const cellStyle = getPatternNumberCellStyle(cell.hex);
+            ctx.fillStyle = cellStyle.fillColor;
+            ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
 
-            const code = colorCodeMap.get(cell.hex) ?? 0;
+            const codeLabel = colorLabelMap.get(cell.hex) ?? 'C1';
             const labelStyle = getPatternCellTextStyle(mode, CELL_SIZE);
-            ctx.fillStyle = mode === 'number' ? getPatternNumberCellStyle(cell.hex).textColor : labelStyle.textColor;
-            ctx.font = `700 ${labelStyle.fontSize}px sans-serif`;
-            ctx.fillText(String(code), px + (CELL_SIZE / 2), py + (CELL_SIZE / 2));
+            const fontSize = codeLabel.length >= 3 ? Math.max(9, labelStyle.fontSize - 2) : labelStyle.fontSize;
+            ctx.fillStyle = getPatternNumberCellStyle(cell.hex).textColor;
+            ctx.font = `700 ${fontSize}px sans-serif`;
+            ctx.fillText(codeLabel, px + (CELL_SIZE / 2), py + (CELL_SIZE / 2));
           } else {
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(px, py, CELL_SIZE, CELL_SIZE);
@@ -168,9 +147,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
         ctx.fillRect(legendX, legendY, LEGEND_WIDTH - 36, 32);
         ctx.strokeRect(legendX, legendY, LEGEND_WIDTH - 36, 32);
 
+        const displayCode = getDisplayCode(entry.code, entry.color.name);
         ctx.fillStyle = '#111827';
-        ctx.font = '900 12px sans-serif';
-        ctx.fillText(String(entry.code), legendX + 16, legendY + 16);
+        ctx.font = `900 ${displayCode.length >= 3 ? 11 : 12}px sans-serif`;
+        ctx.fillText(displayCode, legendX + 16, legendY + 16);
         ctx.fillStyle = entry.color.hex;
         ctx.fillRect(legendX + 30, legendY + 7, 18, 18);
         ctx.fillStyle = '#111827';
@@ -186,9 +166,30 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
     }
 
     return canvas.toDataURL('image/png');
-  };
+  }, [colorLabelMap, gridState.cells, gridState.config, indexedPalette, totalBeans]);
 
-  const exportPattern = async (mode: 'color' | 'number' | 'overlay', label: string) => {
+  const renderPreview = useCallback(async (mode: ExportMode) => {
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
+    setIsPreviewLoading(true);
+    const dataUrl = await drawPatternSheet(mode);
+    if (previewRequestRef.current !== requestId) {
+      return;
+    }
+
+    setPreviewDataUrl(dataUrl);
+    setIsPreviewLoading(false);
+  }, [drawPatternSheet]);
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return;
+    }
+
+    void renderPreview(previewMode);
+  }, [gridState.cells, gridState.config.height, gridState.config.width, isMenuOpen, previewMode, renderPreview]);
+
+  const exportPattern = async (mode: ExportMode, label: string) => {
     const dataUrl = await drawPatternSheet(mode);
     if (!dataUrl) {
       return;
@@ -218,7 +219,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
   const exportCsv = () => {
     const content = [
       '编号,颜色名,HEX,数量',
-      ...indexedPalette.map((entry) => `${entry.code},${entry.color.name},${entry.color.hex},${entry.count}`),
+      ...indexedPalette.map((entry) => `${getDisplayCode(entry.code, entry.color.name)},${entry.color.name},${entry.color.hex},${entry.count}`),
     ].join('\n');
 
     downloadBlob(new Blob([content], { type: 'text/csv;charset=utf-8' }), `拼豆清单-${Date.now()}.csv`);
@@ -227,9 +228,6 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
   const exportAll = async () => {
     await exportPattern('color', '像素图纸');
     await exportPattern('number', '标号图纸');
-    if (overlayImage) {
-      await exportPattern('overlay', '临摹图纸');
-    }
     exportCsv();
     exportJson();
   };
@@ -265,8 +263,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
           {indexedPalette.map((entry) => (
             <div key={entry.color.hex} className="flex items-center justify-between rounded-xl bg-white px-3 py-2">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-900 text-[11px] font-black text-white">
-                  {entry.code}
+                <div className="flex h-7 min-w-7 items-center justify-center rounded-lg bg-gray-900 px-1 text-[10px] font-black text-white">
+                  {getDisplayCode(entry.code, entry.color.name)}
                 </div>
                 <div className="h-5 w-5 rounded-lg border border-white" style={{ backgroundColor: entry.color.hex }} />
                 <div className="min-w-0">
@@ -312,6 +310,57 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
               </button>
             </div>
 
+            <div className="mb-4 rounded-2xl border border-[#eadfd0] bg-[#faf6ef] p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="text-xs font-black text-gray-700">导出预览</h4>
+                <button
+                  type="button"
+                  onClick={() => void renderPreview(previewMode)}
+                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 transition hover:bg-gray-50"
+                >
+                  刷新预览
+                </button>
+              </div>
+
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode('number')}
+                  className={`rounded-lg px-2 py-1 text-[10px] font-black transition ${
+                    previewMode === 'number'
+                      ? 'bg-gray-900 text-white'
+                      : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  标号预览
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode('color')}
+                  className={`rounded-lg px-2 py-1 text-[10px] font-black transition ${
+                    previewMode === 'color'
+                      ? 'bg-gray-900 text-white'
+                      : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  像素预览
+                </button>
+              </div>
+
+              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-[#e7dcc9] bg-white">
+                {previewDataUrl ? (
+                  <img src={previewDataUrl} alt="导出图纸预览" className="h-full w-full object-contain" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs font-semibold text-gray-400">暂无预览</div>
+                )}
+                {isPreviewLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-xs font-semibold text-gray-600">
+                    生成预览中...
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => exportPattern('color', '像素图纸')}
@@ -324,17 +373,6 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, overlayImag
                 className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 transition hover:bg-gray-50"
               >
                 导出标号图纸
-              </button>
-              <button
-                onClick={() => exportPattern('overlay', '临摹图纸')}
-                disabled={!overlayImage}
-                className={`rounded-xl px-3 py-2 text-xs font-black transition ${
-                  overlayImage
-                    ? 'border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
-                    : 'cursor-not-allowed border border-gray-100 bg-gray-100 text-gray-400'
-                }`}
-              >
-                导出临摹图纸
               </button>
               <button
                 onClick={exportCsv}

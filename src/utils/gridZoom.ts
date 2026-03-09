@@ -7,3 +7,45 @@ export const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM,
 export const stepZoom = (zoom: number, direction: 'in' | 'out') => clampZoom(
   zoom + (direction === 'in' ? ZOOM_STEP : -ZOOM_STEP),
 );
+
+export const getCenteredCanvasOffset = (viewportSize: number, canvasSize: number) => Math.max(0, (viewportSize - canvasSize) / 2);
+
+export const shouldStartViewportPanning = ({
+  button,
+  isSpacePressed,
+}: {
+  button: number;
+  isSpacePressed: boolean;
+}) => button === 1 || isSpacePressed;
+
+export const computeAnchoredScrollOffset = ({
+  viewportSize,
+  cursorOffset,
+  scrollOffset,
+  previousCanvasSize,
+  nextCanvasSize,
+  previousCellSize,
+  nextCellSize,
+  previousGutter,
+  nextGutter,
+}: {
+  viewportSize: number;
+  cursorOffset: number;
+  scrollOffset: number;
+  previousCanvasSize: number;
+  nextCanvasSize: number;
+  previousCellSize: number;
+  nextCellSize: number;
+  previousGutter: number;
+  nextGutter: number;
+}) => {
+  const previousCanvasOffset = getCenteredCanvasOffset(viewportSize, previousCanvasSize);
+  const nextCanvasOffset = getCenteredCanvasOffset(viewportSize, nextCanvasSize);
+  const pointInCanvas = scrollOffset + cursorOffset - previousCanvasOffset;
+  const pointInGridUnits = (pointInCanvas - previousGutter) / previousCellSize;
+  const nextPointInCanvas = nextGutter + (pointInGridUnits * nextCellSize);
+  const unclampedScroll = nextPointInCanvas + nextCanvasOffset - cursorOffset;
+  const maxScroll = Math.max(0, nextCanvasSize - viewportSize);
+
+  return Math.max(0, Math.min(maxScroll, Math.round(unclampedScroll)));
+};

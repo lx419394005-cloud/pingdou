@@ -6,6 +6,18 @@ export interface IndexedPaletteEntry {
   count: number;
 }
 
+const LETTER_NUMBER_PATTERN = /^\s*([A-Za-z]{1,3})\s*[-_/]?\s*(\d{1,3})\s*$/;
+
+export const getDisplayCode = (code: number, colorName: string) => {
+  const matched = colorName.match(LETTER_NUMBER_PATTERN);
+  if (matched) {
+    const [, prefix, numberText] = matched;
+    return `${prefix.toUpperCase()}${numberText}`;
+  }
+
+  return `C${Math.max(1, Math.trunc(code))}`;
+};
+
 export const buildIndexedPalette = (cells: GridCell[][]): IndexedPaletteEntry[] => {
   const counts = new Map<string, IndexedPaletteEntry>();
 
@@ -47,6 +59,16 @@ export const buildColorCodeMap = (cells: GridCell[][]): Map<string, number> => {
 
   for (const entry of buildIndexedPalette(cells)) {
     map.set(entry.color.hex, entry.code);
+  }
+
+  return map;
+};
+
+export const buildColorLabelMap = (cells: GridCell[][]): Map<string, string> => {
+  const map = new Map<string, string>();
+
+  for (const entry of buildIndexedPalette(cells)) {
+    map.set(entry.color.hex, getDisplayCode(entry.code, entry.color.name));
   }
 
   return map;

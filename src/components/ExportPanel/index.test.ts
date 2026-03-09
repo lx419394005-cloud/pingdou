@@ -20,11 +20,24 @@ const gridState: GridState = {
 describe('ExportPanel', () => {
   it('shows a single primary export button before opening modal options', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ExportPanel, { gridState, overlayImage: null, compact: true }),
+      React.createElement(ExportPanel, { gridState, compact: true }),
     );
 
     expect(html).toContain('导出图纸');
     expect(html).not.toContain('导出标号图纸');
+    expect(html).not.toContain('导出临摹图纸');
     expect(html).not.toContain('导出工程 JSON');
+  });
+
+  it('keeps preview controls inside modal and hidden before opening export options', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ExportPanel, { gridState, compact: true }),
+    );
+
+    expect(html).not.toContain('导出预览');
+    expect(html).not.toContain('刷新预览');
+    expect(html).not.toContain('标号预览');
+    expect(html).not.toContain('像素预览');
+    expect(html).not.toContain('临摹预览');
   });
 });
