@@ -18,10 +18,19 @@ export interface GridConfig {
 
 export type GridCell = Color | null;
 
+export interface GridLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+  cells: GridCell[][];
+}
+
 export interface GridState {
   config: GridConfig;
   cells: GridCell[][];
   palette: ColorPalette | null;
+  layers: GridLayer[];
+  activeLayerId: string;
 }
 
 export type DrawMode =

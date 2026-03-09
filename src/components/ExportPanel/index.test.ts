@@ -8,6 +8,13 @@ const gridState: GridState = {
   config: { width: 50, height: 50 },
   cells: Array.from({ length: 50 }, () => Array.from({ length: 50 }, () => null)),
   palette: null,
+  layers: [{
+    id: 'layer-1',
+    name: '图层 1',
+    visible: true,
+    cells: Array.from({ length: 50 }, () => Array.from({ length: 50 }, () => null)),
+  }],
+  activeLayerId: 'layer-1',
 };
 
 describe('ExportPanel', () => {

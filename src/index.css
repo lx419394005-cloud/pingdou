@@ -18,6 +18,17 @@
   background: #d1d5db;
 }
 
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 :root {
   --bg-primary: #f4ecdf;
   --bg-secondary: #ffffff;
