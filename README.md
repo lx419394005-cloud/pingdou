@@ -1,5 +1,9 @@
 # Loong 拼豆工房
 
+<a href="https://github.com/lx419394005-cloud/pingdou">
+  <img src="./public/icon-transparent.svg" alt="Loong 拼豆工房网址入口" width="72" />
+</a>
+
 `Loong 拼豆工房` 是一个浏览器端拼豆图纸工作台，覆盖从参考图导入到图纸导出的完整流程。
 
 - 品牌：Loong 拼豆工房
