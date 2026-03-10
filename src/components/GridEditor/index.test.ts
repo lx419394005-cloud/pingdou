@@ -23,6 +23,7 @@ describe('GridEditor', () => {
       React.createElement(GridEditor, {
         gridState,
         hoverLayerPreview: [],
+        selectionPoints: [],
         viewMode: 'color',
         overlayImage: null,
         overlayOpacity: 0.5,
@@ -37,7 +38,7 @@ describe('GridEditor', () => {
       }),
     );
 
-    expect(html).toContain('flex min-h-full min-w-full"><canvas class="block m-auto shrink-0 rounded-2xl');
+    expect(html).toContain('flex min-h-full min-w-full w-max"><canvas class="block m-auto shrink-0 rounded-2xl');
     expect(html).toContain('block m-auto shrink-0 rounded-2xl');
     expect(html).toContain('pointer-events-none absolute bottom-3 right-3 z-20');
     expect(html).not.toContain('flex min-h-full min-w-full items-center justify-center');
@@ -48,6 +49,7 @@ describe('GridEditor', () => {
       React.createElement(GridEditor, {
         gridState,
         hoverLayerPreview: [],
+        selectionPoints: [],
         viewMode: 'color',
         overlayImage: null,
         overlayOpacity: 0.5,
@@ -65,6 +67,7 @@ describe('GridEditor', () => {
     expect(html).toContain('-mb-6 overflow-x-auto pb-6 no-scrollbar');
     expect(html).toContain('pb-6');
     expect(html).toContain('z-40');
+    expect(html).toContain('>选择<');
     expect(html).not.toContain('overflow-y-visible');
   });
 
@@ -73,6 +76,7 @@ describe('GridEditor', () => {
       React.createElement(GridEditor, {
         gridState,
         hoverLayerPreview: [],
+        selectionPoints: [],
         viewMode: 'color',
         overlayImage: null,
         overlayOpacity: 0.5,

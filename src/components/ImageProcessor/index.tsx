@@ -1,7 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AlgorithmMode, Color, GridConfig, GridCell } from '../../types';
 import { estimateRecommendedColorLimit, processImageToGrid } from '../../algorithms/kMeans';
-import { expandBounds, findOpaqueBounds, removeConnectedWhiteBackground } from '../../utils/imageProcessing';
+import {
+  applyPolygonCutout,
+  computeCropSourceRect,
+  expandBounds,
+  findOpaqueBounds,
+  IMPORT_ZOOM_MAX_SCALE,
+  IMPORT_ZOOM_MIN_SCALE,
+  removeConnectedWhiteBackground,
+  removeEdgeConnectedBackgroundByColor,
+  sliderValueToZoomScale,
+  zoomScaleToSliderValue,
+} from '../../utils/imageProcessing';
 import { getImportImageSizeError, isImportImageSizeValid } from '../../utils/importImage';
 
 interface ImageProcessorProps {
@@ -31,6 +42,13 @@ interface CropRect {
   height: number;
 }
 
+interface PreviewPoint {
+  x: number;
+  y: number;
+}
+
+type EditMode = 'move' | 'lasso-keep' | 'lasso-remove';
+
 const PREVIEW_SIZE = 280;
 const PREVIEW_PADDING = 20;
 const MIN_TARGET_COLORS = 4;
@@ -38,6 +56,11 @@ const MAX_TARGET_COLORS = 12;
 const WORKING_RESOLUTION_OPTIONS = [120, 160, 200];
 const TRACE_OVERLAY_SCALE = 12;
 const TRACE_OVERLAY_MAX_SIZE = 1200;
+
+const clampImportScale = (value: number) => Math.min(
+  IMPORT_ZOOM_MAX_SCALE,
+  Math.max(IMPORT_ZOOM_MIN_SCALE, Number(value.toFixed(4))),
+);
 
 const getCropRect = (width: number, height: number): CropRect => {
   const usable = PREVIEW_SIZE - (PREVIEW_PADDING * 2);
@@ -120,6 +143,9 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [editMode, setEditMode] = useState<EditMode>('move');
+  const [isLassoDrawing, setIsLassoDrawing] = useState(false);
+  const [lassoPath, setLassoPath] = useState<PreviewPoint[]>([]);
   const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
   const [targetColorMode, setTargetColorMode] = useState<'auto' | 'manual'>('auto');
   const [recommendedTargetColors, setRecommendedTargetColors] = useState(6);
@@ -130,6 +156,7 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     [targetConfig.height, targetConfig.width],
   );
   const isModal = variant === 'modal';
+  const zoomSliderValue = useMemo(() => zoomScaleToSliderValue(scale), [scale]);
 
   const fitToSubject = useCallback(() => {
     if (!image) {
@@ -137,9 +164,149 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     }
 
     const fitted = getFittedTransform(subjectBounds, cropRect, image.width, image.height);
-    setScale(fitted.scale);
+    setScale(clampImportScale(fitted.scale));
     setOffset(fitted.offset);
   }, [cropRect, image, subjectBounds]);
+
+  const readImageData = useCallback(() => {
+    if (!image) {
+      return null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return null;
+    }
+
+    ctx.drawImage(image, 0, 0);
+    return ctx.getImageData(0, 0, image.width, image.height);
+  }, [image]);
+
+  const applyImageDataUpdate = useCallback((nextImageData: ImageData, fitToSubjectAfter = false) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = nextImageData.width;
+    canvas.height = nextImageData.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    ctx.putImageData(nextImageData, 0, 0);
+    const bounds = findOpaqueBounds(nextImageData);
+    const previewUrl = canvas.toDataURL('image/png');
+    const nextImage = new Image();
+    nextImage.onload = () => {
+      const expandedBounds = bounds ? expandBounds(bounds, 12, nextImage.width, nextImage.height) : bounds;
+      setImage(nextImage);
+      setSubjectBounds(expandedBounds);
+
+      if (fitToSubjectAfter) {
+        const fitted = getFittedTransform(expandedBounds, cropRect, nextImage.width, nextImage.height);
+        setScale(clampImportScale(fitted.scale));
+        setOffset(fitted.offset);
+      } else {
+        setScale((prev) => clampImportScale(prev));
+      }
+    };
+    nextImage.src = previewUrl;
+  }, [cropRect]);
+
+  const getPreviewPoint = useCallback((event: React.MouseEvent<HTMLCanvasElement>): PreviewPoint => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) {
+      return { x: event.clientX, y: event.clientY };
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = PREVIEW_SIZE / Math.max(1, rect.width);
+    const scaleY = PREVIEW_SIZE / Math.max(1, rect.height);
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const completeLassoSelection = useCallback(() => {
+    if (!isLassoDrawing || editMode === 'move' || lassoPath.length < 3) {
+      setIsLassoDrawing(false);
+      setLassoPath([]);
+      return;
+    }
+
+    const imageData = readImageData();
+    if (!imageData) {
+      setIsLassoDrawing(false);
+      setLassoPath([]);
+      return;
+    }
+
+    const polygon = lassoPath.map((point) => ({
+      x: (point.x - offset.x) / Math.max(0.01, scale),
+      y: (point.y - offset.y) / Math.max(0.01, scale),
+    }));
+    const next = applyPolygonCutout(
+      imageData,
+      polygon,
+      editMode === 'lasso-keep' ? 'keep' : 'remove',
+    );
+    applyImageDataUpdate(next, false);
+    setIsLassoDrawing(false);
+    setLassoPath([]);
+  }, [applyImageDataUpdate, editMode, isLassoDrawing, lassoPath, offset.x, offset.y, readImageData, scale]);
+
+  const handleAutoCutout = useCallback(() => {
+    const imageData = readImageData();
+    if (!imageData) {
+      return;
+    }
+
+    const cleaned = removeEdgeConnectedBackgroundByColor(imageData, 46);
+    applyImageDataUpdate(cleaned, false);
+  }, [applyImageDataUpdate, readImageData]);
+
+  const handleApplyCrop = useCallback(() => {
+    if (!image) {
+      return;
+    }
+
+    const sourceRect = computeCropSourceRect(
+      cropRect,
+      offset,
+      scale,
+      image.width,
+      image.height,
+    );
+    if (!sourceRect) {
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sourceRect.sw;
+    canvas.height = sourceRect.sh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      image,
+      sourceRect.sx,
+      sourceRect.sy,
+      sourceRect.sw,
+      sourceRect.sh,
+      0,
+      0,
+      sourceRect.sw,
+      sourceRect.sh,
+    );
+
+    const imageData = ctx.getImageData(0, 0, sourceRect.sw, sourceRect.sh);
+    applyImageDataUpdate(imageData, true);
+  }, [applyImageDataUpdate, cropRect, image, offset, scale]);
 
   const drawPreview = useCallback(() => {
     const canvas = previewCanvasRef.current;
@@ -196,7 +363,28 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     ctx.setLineDash([8, 6]);
     ctx.strokeRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
     ctx.setLineDash([]);
-  }, [cropRect, image, offset.x, offset.y, scale]);
+
+    if (lassoPath.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = editMode === 'lasso-remove' ? '#dc2626' : '#16a34a';
+      ctx.fillStyle = editMode === 'lasso-remove' ? 'rgba(220, 38, 38, 0.16)' : 'rgba(22, 163, 74, 0.14)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(lassoPath[0]?.x ?? 0, lassoPath[0]?.y ?? 0);
+      for (let i = 1; i < lassoPath.length; i++) {
+        const point = lassoPath[i] as PreviewPoint;
+        ctx.lineTo(point.x, point.y);
+      }
+      if (!isLassoDrawing) {
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }, [cropRect, editMode, image, isLassoDrawing, lassoPath, offset.x, offset.y, scale]);
 
   const renderToCanvas = useCallback((canvas: HTMLCanvasElement, width: number, height: number) => {
     if (!image) {
@@ -334,7 +522,7 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
           setSourceName(file.name);
           setSubjectBounds(expandedBounds);
           setImage(cleanedImage);
-          setScale(fitted.scale);
+          setScale(clampImportScale(fitted.scale));
           setOffset(fitted.offset);
           setTargetColorMode('auto');
           setManualTargetColors(6);
@@ -421,6 +609,10 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     setSubjectBounds(null);
     setScale(1);
     setOffset({ x: 0, y: 0 });
+    setEditMode('move');
+    setIsDragging(false);
+    setIsLassoDrawing(false);
+    setLassoPath([]);
     setTargetColorMode('auto');
     setRecommendedTargetColors(6);
     setManualTargetColors(6);
@@ -430,10 +622,10 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
 
   return (
     <div className={isModal ? 'h-full' : 'rounded-[28px] border border-[#eadfd0] bg-white p-4 shadow-[0_20px_60px_rgba(146,95,37,0.08)]'}>
-      <div className="mb-4 flex items-center justify-between">
+      <div className={`${isModal ? 'mb-3' : 'mb-4'} flex items-center justify-between`}>
         <div>
-          <h3 className={`${isModal ? 'text-lg' : 'text-sm'} font-black text-gray-800`}>图片导入</h3>
-          <p className="text-xs text-gray-500">自动去掉白色背景，只对主体做拼豆计算</p>
+          <h3 className={`${isModal ? 'text-base' : 'text-sm'} font-black text-gray-800`}>图片导入</h3>
+          <p className="text-xs text-gray-500">支持自动抠图、划线抠图与裁切，只对主体做拼豆计算</p>
         </div>
         {image && <span className="rounded-full bg-orange-50 px-2 py-1 text-[10px] font-bold text-orange-600">主体已识别</span>}
       </div>
@@ -443,9 +635,9 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
           请先载入豆子色卡
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className={isModal ? 'space-y-3' : 'space-y-4'}>
           {isLoadingImage && !image ? (
-            <div className={`w-full rounded-[24px] border border-[#e8d9c3] bg-[#fbf6ee] ${isModal ? 'p-10' : 'p-6'}`}>
+            <div className={`w-full rounded-[24px] border border-[#e8d9c3] bg-[#fbf6ee] ${isModal ? 'p-7' : 'p-6'}`}>
               <div className="mx-auto max-w-sm">
                 <div className="mb-4 flex items-center justify-center gap-3">
                   <svg className="h-7 w-7 animate-spin text-orange-500" viewBox="0 0 24 24" fill="none">
@@ -464,7 +656,7 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
           ) : !image ? (
             <button
               onClick={requestFilePicker}
-              className={`flex w-full flex-col items-center gap-2 rounded-[24px] border-2 border-dashed border-[#dcc9ae] bg-[#faf6ef] text-sm font-black text-[#8d5a24] transition hover:border-orange-400 hover:bg-orange-50 ${isModal ? 'py-16' : 'py-8'}`}
+              className={`flex w-full flex-col items-center gap-2 rounded-[24px] border-2 border-dashed border-[#dcc9ae] bg-[#faf6ef] text-sm font-black text-[#8d5a24] transition hover:border-orange-400 hover:bg-orange-50 ${isModal ? 'py-12' : 'py-8'}`}
             >
               <svg className="h-8 w-8 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -473,9 +665,9 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
               <span className="text-xs font-medium text-gray-500">支持裁切、缩放、自动去白底</span>
             </button>
           ) : (
-            <div className={isModal ? 'grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]' : 'space-y-4'}>
-              <div className="space-y-4">
-                <div className="rounded-[24px] border border-gray-100 bg-[#faf8f3] p-3">
+            <div className={isModal ? 'grid gap-3 xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start' : 'space-y-4'}>
+              <div className={isModal ? 'space-y-3' : 'space-y-4'}>
+                <div className={`rounded-[24px] border border-gray-100 bg-[#faf8f3] ${isModal ? 'p-2.5' : 'p-3'}`}>
                   <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                     <span className="truncate font-semibold">{sourceName}</span>
                     <span>{targetConfig.width} × {targetConfig.height}</span>
@@ -486,51 +678,95 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                     width={PREVIEW_SIZE}
                     height={PREVIEW_SIZE}
                     onMouseDown={(e) => {
-                      setIsDragging(true);
-                      setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
-                    }}
-                    onMouseMove={(e) => {
-                      if (!isDragging) {
+                      const point = getPreviewPoint(e);
+                      if (editMode === 'move') {
+                        setIsDragging(true);
+                        setDragStart({ x: point.x - offset.x, y: point.y - offset.y });
                         return;
                       }
-                      setOffset({
-                        x: e.clientX - dragStart.x,
-                        y: e.clientY - dragStart.y,
+
+                      setIsLassoDrawing(true);
+                      setLassoPath([point]);
+                    }}
+                    onMouseMove={(e) => {
+                      const point = getPreviewPoint(e);
+                      if (editMode === 'move') {
+                        if (!isDragging) {
+                          return;
+                        }
+                        setOffset({
+                          x: point.x - dragStart.x,
+                          y: point.y - dragStart.y,
+                        });
+                        return;
+                      }
+
+                      if (!isLassoDrawing) {
+                        return;
+                      }
+
+                      setLassoPath((prev) => {
+                        const last = prev[prev.length - 1];
+                        if (last && Math.hypot(point.x - last.x, point.y - last.y) < 1.4) {
+                          return prev;
+                        }
+                        return [...prev, point];
                       });
                     }}
-                    onMouseUp={() => setIsDragging(false)}
-                    onMouseLeave={() => setIsDragging(false)}
+                    onMouseUp={() => {
+                      if (editMode === 'move') {
+                        setIsDragging(false);
+                        return;
+                      }
+                      completeLassoSelection();
+                    }}
+                    onMouseLeave={() => {
+                      if (editMode === 'move') {
+                        setIsDragging(false);
+                        return;
+                      }
+                      completeLassoSelection();
+                    }}
                     onWheel={(e) => {
                       e.preventDefault();
-                      const nextScale = Math.max(0.1, Math.min(8, scale * (e.deltaY > 0 ? 0.94 : 1.06)));
+                      const nextScale = clampImportScale(scale * (e.deltaY > 0 ? 0.985 : 1.015));
                       setScale(nextScale);
                     }}
-                    className="mx-auto cursor-move rounded-[20px] border border-[#dbc8b0] bg-white shadow-sm"
+                    className={`mx-auto rounded-[20px] border border-[#dbc8b0] bg-white shadow-sm ${
+                      editMode === 'move' ? 'cursor-move' : 'cursor-crosshair'
+                    }`}
                   />
 
-                  <p className="mt-2 text-center text-[11px] text-gray-500">拖动调整裁切位置，滚轮或滑块自由缩放</p>
+                  <p className="mt-2 text-center text-[11px] text-gray-500">
+                    {editMode === 'move'
+                      ? '拖动调整裁切位置，滚轮或滑块细调缩放'
+                      : editMode === 'lasso-keep'
+                        ? '划线圈出要保留的主体，松开鼠标应用'
+                        : '划线圈出要删除的区域，松开鼠标应用'}
+                  </p>
                 </div>
 
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                <div className={`rounded-2xl border border-gray-100 bg-gray-50 ${isModal ? 'p-2.5' : 'p-3'}`}>
                   <div className="mb-2 flex items-center justify-between text-xs font-bold text-gray-500">
                     <span>缩放</span>
                     <span className="text-orange-600">{Math.round(scale * 100)}%</span>
                   </div>
                   <input
                     type="range"
-                    min="0.1"
-                    max="6"
-                    step="0.05"
-                    value={scale}
-                    onChange={(e) => setScale(Number.parseFloat(e.target.value))}
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={zoomSliderValue}
+                    onChange={(e) => setScale(sliderValueToZoomScale(Number.parseFloat(e.target.value)))}
                     className="w-full accent-orange-500"
                   />
+                  <p className="mt-1 text-[10px] text-gray-500">范围 {Math.round(IMPORT_ZOOM_MIN_SCALE * 100)}% - {Math.round(IMPORT_ZOOM_MAX_SCALE * 100)}%</p>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+              <div className={isModal ? 'space-y-3' : 'space-y-4'}>
+                <div className="grid gap-2.5 md:grid-cols-2">
+                  <div className={`rounded-2xl border border-gray-100 bg-gray-50 ${isModal ? 'p-2.5' : 'p-3'}`}>
                     <div className="mb-2 text-xs font-bold text-gray-500">算法模式</div>
                     <select
                       value={algorithmMode}
@@ -544,7 +780,7 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                     </select>
                   </div>
 
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                  <div className={`rounded-2xl border border-gray-100 bg-gray-50 ${isModal ? 'p-2.5' : 'p-3'}`}>
                     <div className="mb-2 flex items-center justify-between text-xs font-bold text-gray-500">
                       <span>目标颜色数</span>
                       <span className="text-orange-600">
@@ -587,10 +823,62 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                       className="w-full accent-orange-500"
                     />
                   </div>
+
+                  <div className={`rounded-2xl border border-gray-100 bg-gray-50 md:col-span-2 ${isModal ? 'p-2.5' : 'p-3'}`}>
+                    <div className="mb-2 text-xs font-bold text-gray-500">抠图工具</div>
+                    <div className="grid gap-2 sm:grid-cols-[repeat(3,minmax(0,1fr))]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditMode('move');
+                          setIsLassoDrawing(false);
+                          setLassoPath([]);
+                        }}
+                        className={`rounded-xl px-2 py-2 text-[11px] font-bold transition ${
+                          editMode === 'move' ? 'bg-orange-500 text-white' : 'border border-gray-200 bg-white text-gray-600'
+                        }`}
+                      >
+                        移动
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditMode('lasso-keep');
+                          setIsLassoDrawing(false);
+                          setLassoPath([]);
+                        }}
+                        className={`rounded-xl px-2 py-2 text-[11px] font-bold transition ${
+                          editMode === 'lasso-keep' ? 'bg-emerald-500 text-white' : 'border border-gray-200 bg-white text-gray-600'
+                        }`}
+                      >
+                        划线保留
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditMode('lasso-remove');
+                          setIsLassoDrawing(false);
+                          setLassoPath([]);
+                        }}
+                        className={`rounded-xl px-2 py-2 text-[11px] font-bold transition ${
+                          editMode === 'lasso-remove' ? 'bg-red-500 text-white' : 'border border-gray-200 bg-white text-gray-600'
+                        }`}
+                      >
+                        划线删除
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAutoCutout}
+                      className="mt-2 w-full rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700 transition hover:bg-orange-100"
+                    >
+                      自动识别主体并抠图
+                    </button>
+                  </div>
                 </div>
 
                 {enableExperimentalModes && (
-                  <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                  <div className={`rounded-2xl border border-gray-100 bg-gray-50 ${isModal ? 'p-2.5' : 'p-3'}`}>
                     <div className="mb-2 flex items-center justify-between text-xs font-bold text-gray-500">
                       <span>工作分辨率</span>
                       <span className="text-orange-600">{workingResolution} × {workingResolution}</span>
@@ -618,23 +906,30 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                 )}
 
                 {isModal && (
-                  <div className="rounded-2xl border border-gray-100 bg-[#faf8f3] p-4">
-                    <h4 className="mb-2 text-sm font-black text-gray-800">导入说明</h4>
+                  <div className="rounded-2xl border border-gray-100 bg-[#faf8f3] p-3">
+                    <h4 className="mb-1.5 text-xs font-black text-gray-800">导入说明</h4>
                     <div className="space-y-1 text-xs leading-6 text-gray-500">
-                      <p>1. 先导入参考图，系统会自动去掉白色背景。</p>
-                      <p>2. 在左侧预览区拖动裁切位置，滚轮或滑块控制缩放。</p>
-                      <p>3. 右侧设置算法和目标颜色数，再生成图纸。</p>
+                      <p>1. 导入后可先用“自动识别主体并抠图”。</p>
+                      <p>2. 需要精修时切换“划线保留/划线删除”在左侧直接圈选。</p>
+                      <p>3. 确认后点击“应用裁切”，再设置算法与颜色数生成图纸。</p>
                     </div>
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                   <button
                     type="button"
                     onClick={fitToSubject}
-                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                    className={`rounded-xl border border-gray-200 bg-white px-3 ${isModal ? 'py-1.5' : 'py-2'} text-xs font-bold text-gray-700 transition hover:bg-gray-50`}
                   >
                     主体适配
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyCrop}
+                    className={`rounded-xl border border-orange-200 bg-orange-50 px-3 ${isModal ? 'py-1.5' : 'py-2'} text-xs font-bold text-orange-700 transition hover:bg-orange-100`}
+                  >
+                    应用裁切
                   </button>
                   <button
                     type="button"
@@ -642,14 +937,14 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                       handleClear();
                       requestFilePicker();
                     }}
-                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                    className={`rounded-xl border border-gray-200 bg-white px-3 ${isModal ? 'py-1.5' : 'py-2'} text-xs font-bold text-gray-700 transition hover:bg-gray-50`}
                   >
                     重新导入
                   </button>
                   <button
                     type="button"
                     onClick={handleProcess}
-                    className="rounded-xl bg-orange-500 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-orange-600"
+                    className={`rounded-xl bg-orange-500 px-3 ${isModal ? 'py-1.5' : 'py-2'} text-xs font-black text-white shadow-sm transition hover:bg-orange-600`}
                   >
                     生成图纸
                   </button>

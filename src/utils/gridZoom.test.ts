@@ -37,6 +37,10 @@ describe('gridZoom', () => {
   it('treats space drag and middle click as viewport pan gestures', () => {
     expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false })).toBe(false);
     expect(shouldStartViewportPanning({ button: 1, isSpacePressed: false })).toBe(true);
+    expect(shouldStartViewportPanning({ button: 2, isSpacePressed: false })).toBe(true);
     expect(shouldStartViewportPanning({ button: 0, isSpacePressed: true })).toBe(true);
+    expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: false })).toBe(true);
+    expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: true })).toBe(false);
+    expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: true, isPanMode: true })).toBe(true);
   });
 });

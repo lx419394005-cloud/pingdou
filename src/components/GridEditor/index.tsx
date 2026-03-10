@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Color, DrawMode, GridState } from '../../types';
 import { buildColorLabelMap } from '../../utils/pattern';
 import { clampZoom, computeAnchoredScrollOffset, shouldStartViewportPanning, stepZoom } from '../../utils/gridZoom';
@@ -6,7 +6,7 @@ import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellS
 
 export type EditorViewMode = 'color' | 'number' | 'overlay';
 
-type ToolGroup = 'draw' | 'shape';
+type ToolGroup = 'draw' | 'select' | 'shape';
 
 const TOOL_BUTTONS: Array<{
   mode: DrawMode;
@@ -67,6 +67,59 @@ const TOOL_BUTTONS: Array<{
     ),
   },
   {
+    mode: 'select',
+    label: '框选',
+    group: 'select',
+    activeClass: 'bg-indigo-600 text-white',
+    icon: () => (
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 8V4h4" />
+        <path d="M16 4h4v4" />
+        <path d="M20 16v4h-4" />
+        <path d="M8 20H4v-4" />
+        <path d="M8 4h3" />
+        <path d="M13 20h3" />
+        <path d="M4 13v-2" />
+        <path d="M20 13v-2" />
+      </svg>
+    ),
+  },
+  {
+    mode: 'move',
+    label: '移动选区',
+    group: 'select',
+    activeClass: 'bg-indigo-700 text-white',
+    icon: () => (
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 2v20" />
+        <path d="M2 12h20" />
+        <path d="M12 2l-3 3" />
+        <path d="M12 2l3 3" />
+        <path d="M12 22l-3-3" />
+        <path d="M12 22l3-3" />
+        <path d="M2 12l3-3" />
+        <path d="M2 12l3 3" />
+        <path d="M22 12l-3-3" />
+        <path d="M22 12l-3 3" />
+      </svg>
+    ),
+  },
+  {
+    mode: 'pan',
+    label: '视图平移',
+    group: 'draw',
+    activeClass: 'bg-slate-700 text-white',
+    icon: () => (
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M8 12V6a1 1 0 0 1 2 0v6" />
+        <path d="M12 12V4a1 1 0 0 1 2 0v8" />
+        <path d="M16 13V7a1 1 0 0 1 2 0v6" />
+        <path d="M6 13v-1a1 1 0 0 1 2 0v1" />
+        <path d="M6 13v3a6 6 0 0 0 6 6h1a5 5 0 0 0 5-5v-3a2 2 0 0 0-2-2h-3" />
+      </svg>
+    ),
+  },
+  {
     mode: 'line',
     label: '直线',
     group: 'shape',
@@ -116,12 +169,14 @@ const TOOL_BUTTONS: Array<{
 
 const TOOL_GROUPS: Array<{ id: ToolGroup; label: string }> = [
   { id: 'draw', label: '绘制' },
+  { id: 'select', label: '选择' },
   { id: 'shape', label: '形状' },
 ];
 
 interface GridEditorProps {
   gridState: GridState;
   hoverLayerPreview: Array<{ x: number; y: number; color: Color }>;
+  selectionPoints: Array<{ x: number; y: number }>;
   viewMode: EditorViewMode;
   overlayImage: string | null;
   overlayOpacity: number;
@@ -136,10 +191,16 @@ interface GridEditorProps {
 }
 
 const BASE_CELL_SIZE = 18;
+const FREE_PAN_EXTRA = 220;
+const FREE_PAN_MIN = 360;
+const TRACKPAD_PAN_MULTIPLIER = 2.1;
+const TRACKPAD_DELTA_FALLBACK_THRESHOLD = 0.08;
+const clampFreePanOffset = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
 
 export const GridEditor: React.FC<GridEditorProps> = ({
   gridState,
   hoverLayerPreview,
+  selectionPoints,
   viewMode,
   overlayImage,
   overlayOpacity,
@@ -154,17 +215,32 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const panStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const panStartRef = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+    offsetX: number;
+    offsetY: number;
+    canScrollX: boolean;
+    canScrollY: boolean;
+  } | null>(null);
   const spacePressedRef = useRef(false);
+  const freePanOffsetRef = useRef({ x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [manualZoom, setManualZoom] = useState<number | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [freePanOffset, setFreePanOffset] = useState({ x: 0, y: 0 });
 
   const colorLabelMap = useMemo(() => buildColorLabelMap(gridState.cells), [gridState.cells]);
   const previewKeySet = useMemo(
     () => new Set(previewPoints.map((point) => `${point.x},${point.y}`)),
     [previewPoints],
+  );
+  const selectionKeySet = useMemo(
+    () => new Set(selectionPoints.map((point) => `${point.x},${point.y}`)),
+    [selectionPoints],
   );
   const hoverPreviewMap = useMemo(
     () => new Map(hoverLayerPreview.map((point) => [`${point.x},${point.y}`, point.color])),
@@ -193,6 +269,19 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const canvasWidth = gutter + (width * cellSize) + 1;
   const canvasHeight = gutter + (height * cellSize) + 1;
   const strokeWidth = zoom >= 1.4 ? 1 : 0.7;
+  const canScrollX = canvasWidth > Math.max(0, viewportSize.width - 1);
+  const canScrollY = canvasHeight > Math.max(0, viewportSize.height - 1);
+  const freePanLimitX = Math.max(FREE_PAN_MIN, Math.max(0, (viewportSize.width - canvasWidth) / 2) + FREE_PAN_EXTRA);
+  const freePanLimitY = Math.max(FREE_PAN_MIN, Math.max(0, (viewportSize.height - canvasHeight) / 2) + FREE_PAN_EXTRA);
+
+  const updateFreePanOffset = useCallback((next: { x: number; y: number }) => {
+    const normalized = {
+      x: clampFreePanOffset(next.x, freePanLimitX),
+      y: clampFreePanOffset(next.y, freePanLimitY),
+    };
+    freePanOffsetRef.current = normalized;
+    setFreePanOffset(normalized);
+  }, [freePanLimitX, freePanLimitY]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -215,6 +304,16 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const next = {
+      x: canScrollX ? 0 : freePanOffsetRef.current.x,
+      y: canScrollY ? 0 : freePanOffsetRef.current.y,
+    };
+    if (next.x !== freePanOffsetRef.current.x || next.y !== freePanOffsetRef.current.y) {
+      updateFreePanOffset(next);
+    }
+  }, [canScrollX, canScrollY, updateFreePanOffset]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -415,6 +514,30 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       }
     };
 
+    const drawSelection = () => {
+      if (selectionKeySet.size === 0) {
+        return;
+      }
+
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      for (const key of selectionKeySet) {
+        const [xText, yText] = key.split(',');
+        const x = Number.parseInt(xText, 10);
+        const y = Number.parseInt(yText, 10);
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+          continue;
+        }
+
+        const px = gridX + (x * cellSize);
+        const py = gridY + (y * cellSize);
+        ctx.strokeStyle = '#4338ca';
+        ctx.lineWidth = Math.max(1, strokeWidth * 1.35);
+        ctx.strokeRect(px + 0.5, py + 0.5, Math.max(1, cellSize - 1), Math.max(1, cellSize - 1));
+      }
+      ctx.restore();
+    };
+
     if (viewMode === 'overlay' && overlayImage) {
       const image = new Image();
       image.onload = () => {
@@ -426,6 +549,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         paintCells();
         drawHoveredLayer();
         drawPreview();
+        drawSelection();
       };
       image.src = overlayImage;
       return;
@@ -434,7 +558,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     paintCells();
     drawHoveredLayer();
     drawPreview();
-  }, [cellSize, colorLabelMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, strokeWidth, viewMode, zoom]);
+    drawSelection();
+  }, [cellSize, colorLabelMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, selectionKeySet, strokeWidth, viewMode, width, height, zoom]);
 
   const getGridPosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -455,7 +580,11 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (shouldStartViewportPanning({ button: e.button, isSpacePressed: spacePressedRef.current })) {
+    if (shouldStartViewportPanning({
+      button: e.button,
+      isSpacePressed: spacePressedRef.current,
+      isPanMode: drawMode === 'pan',
+    })) {
       return;
     }
 
@@ -493,18 +622,47 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     if (!viewport) {
       return;
     }
+    const deltaScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientWidth : 1;
+    const normalizedDeltaX = event.deltaX * deltaScale;
+    const normalizedDeltaY = event.deltaY * deltaScale;
 
     // Trackpad/mouse-wheel scrolling should pan the viewport naturally.
     // Only intercept explicit zoom gestures (pinch or modifier-assisted wheel).
     const shouldZoom = event.ctrlKey || event.metaKey;
     if (!shouldZoom) {
+      let effectiveDeltaX = normalizedDeltaX;
+      if (
+        Math.abs(effectiveDeltaX) < TRACKPAD_DELTA_FALLBACK_THRESHOLD
+        && Math.abs(normalizedDeltaY) > TRACKPAD_DELTA_FALLBACK_THRESHOLD
+        && !canScrollY
+      ) {
+        // Some devices/browsers report horizontal gestures as deltaY when there is no vertical scroll context.
+        effectiveDeltaX = normalizedDeltaY;
+      }
+      const nextOffset = {
+        x: freePanOffsetRef.current.x,
+        y: freePanOffsetRef.current.y,
+      };
+      if (!canScrollX && Math.abs(effectiveDeltaX) > 0) {
+        nextOffset.x = freePanOffsetRef.current.x - (effectiveDeltaX * TRACKPAD_PAN_MULTIPLIER);
+      }
+      if (!canScrollY && Math.abs(normalizedDeltaY) > 0) {
+        nextOffset.y = freePanOffsetRef.current.y - (normalizedDeltaY * TRACKPAD_PAN_MULTIPLIER);
+      }
+      if (nextOffset.x !== freePanOffsetRef.current.x || nextOffset.y !== freePanOffsetRef.current.y) {
+        event.preventDefault();
+        updateFreePanOffset(nextOffset);
+      }
       return;
     }
 
     event.preventDefault();
+    if (freePanOffsetRef.current.x !== 0 || freePanOffsetRef.current.y !== 0) {
+      updateFreePanOffset({ x: 0, y: 0 });
+    }
 
     const previousZoom = manualZoom ?? fitZoom;
-    const factor = event.deltaY < 0 ? 1.08 : 0.92;
+    const factor = normalizedDeltaY < 0 ? 1.08 : 0.92;
     const nextZoom = clampZoom(previousZoom * factor);
     if (Math.abs(nextZoom - previousZoom) < 0.001) {
       return;
@@ -552,10 +710,13 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     if (!viewport) {
       return;
     }
+    const isCanvasTarget = event.target instanceof HTMLCanvasElement;
 
     const shouldPan = shouldStartViewportPanning({
       button: event.button,
       isSpacePressed: spacePressedRef.current,
+      isCanvasTarget,
+      isPanMode: drawMode === 'pan',
     });
     if (!shouldPan) {
       return;
@@ -567,30 +728,86 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       y: event.clientY,
       scrollLeft: viewport.scrollLeft,
       scrollTop: viewport.scrollTop,
+      offsetX: freePanOffsetRef.current.x,
+      offsetY: freePanOffsetRef.current.y,
+      canScrollX,
+      canScrollY,
     };
     setIsPanning(true);
   };
 
-  const handleViewportMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+  const applyPanFromPointer = useCallback((clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
     const panStart = panStartRef.current;
     if (!viewport || !panStart) {
       return;
     }
 
+    const deltaX = clientX - panStart.x;
+    const deltaY = clientY - panStart.y;
+    if (panStart.canScrollX) {
+      viewport.scrollLeft = panStart.scrollLeft - deltaX;
+    }
+    if (panStart.canScrollY) {
+      viewport.scrollTop = panStart.scrollTop - deltaY;
+    }
+
+    if (!panStart.canScrollX || !panStart.canScrollY) {
+      const nextOffset = {
+        x: panStart.canScrollX ? panStart.offsetX : panStart.offsetX + deltaX,
+        y: panStart.canScrollY ? panStart.offsetY : panStart.offsetY + deltaY,
+      };
+      if (nextOffset.x !== freePanOffsetRef.current.x || nextOffset.y !== freePanOffsetRef.current.y) {
+        updateFreePanOffset(nextOffset);
+      }
+    }
+  }, [updateFreePanOffset]);
+
+  const handleViewportMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!panStartRef.current) {
+      return;
+    }
+
     event.preventDefault();
-    const deltaX = event.clientX - panStart.x;
-    const deltaY = event.clientY - panStart.y;
-    viewport.scrollLeft = panStart.scrollLeft - deltaX;
-    viewport.scrollTop = panStart.scrollTop - deltaY;
+    applyPanFromPointer(event.clientX, event.clientY);
   };
 
-  const stopPanning = () => {
+  const stopPanning = useCallback(() => {
     panStartRef.current = null;
     setIsPanning(false);
-  };
+  }, []);
 
-  const canvasCursor = isPanning ? 'grabbing' : isSpacePressed ? 'grab' : 'crosshair';
+  useEffect(() => {
+    if (!isPanning) {
+      return;
+    }
+
+    const handleWindowMouseMove = (event: MouseEvent) => {
+      applyPanFromPointer(event.clientX, event.clientY);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', stopPanning);
+    window.addEventListener('blur', stopPanning);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', stopPanning);
+      window.removeEventListener('blur', stopPanning);
+    };
+  }, [applyPanFromPointer, isPanning, stopPanning]);
+
+  const canvasCursor = isPanning
+    ? 'grabbing'
+    : (
+      drawMode === 'pan'
+      || isSpacePressed
+      || drawMode === 'move'
+        ? 'grab'
+        : drawMode === 'select'
+          ? 'crosshair'
+          : 'crosshair'
+    );
 
   return (
     <div
@@ -606,17 +823,20 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           onMouseDown={handleViewportMouseDown}
           onMouseMove={handleViewportMouseMove}
           onMouseUp={stopPanning}
-          onMouseLeave={stopPanning}
           className="h-full min-h-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
           style={{ scrollbarGutter: 'stable both-edges' }}
         >
-          <div className="flex min-h-full min-w-full">
+          <div className="flex min-h-full min-w-full w-max">
             <canvas
               ref={canvasRef}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               className="block m-auto shrink-0 rounded-2xl border border-[#dbc8b0] bg-white"
-              style={{ imageRendering: 'pixelated', cursor: canvasCursor }}
+              style={{
+                imageRendering: 'pixelated',
+                cursor: canvasCursor,
+                transform: `translate(${freePanOffset.x}px, ${freePanOffset.y}px)`,
+              }}
             />
           </div>
         </div>
@@ -624,7 +844,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-[#e7dcc9] bg-white/96 px-2 py-1 shadow-sm backdrop-blur">
             <button
               type="button"
-              onClick={() => setManualZoom((current) => stepZoom(current ?? fitZoom, 'out'))}
+              onClick={() => {
+                updateFreePanOffset({ x: 0, y: 0 });
+                setManualZoom((current) => stepZoom(current ?? fitZoom, 'out'));
+              }}
               className="rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-black text-gray-700 transition hover:bg-gray-50"
               title="缩小"
             >
@@ -633,7 +856,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             <div className="min-w-10 text-center text-[11px] font-black text-gray-700">{zoomLabel}</div>
             <button
               type="button"
-              onClick={() => setManualZoom((current) => stepZoom(current ?? fitZoom, 'in'))}
+              onClick={() => {
+                updateFreePanOffset({ x: 0, y: 0 });
+                setManualZoom((current) => stepZoom(current ?? fitZoom, 'in'));
+              }}
               className="rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-black text-gray-700 transition hover:bg-gray-50"
               title="放大"
             >
@@ -680,13 +906,22 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               缩放，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">双指滚动</kbd>
               平移，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">右键拖拽</kbd>
+              平移，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">框选+移动</kbd>
+              搬移内容，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">平移工具</kbd>
+              左键拖拽，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Space + 拖拽</kbd>
               平移
             </div>
             <button
               type="button"
               aria-label="适应窗口"
-              onClick={() => setManualZoom(null)}
+              onClick={() => {
+                updateFreePanOffset({ x: 0, y: 0 });
+                setManualZoom(null);
+              }}
               className="inline-flex items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
             >
               <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[9px] leading-none text-[#dd6b20]">

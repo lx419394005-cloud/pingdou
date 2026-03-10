@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { findOpaqueBounds, removeConnectedWhiteBackground } from './imageProcessing';
+import {
+  computeCropSourceRect,
+  findOpaqueBounds,
+  sliderValueToZoomScale,
+  applyPolygonCutout,
+  removeConnectedWhiteBackground,
+  removeEdgeConnectedBackgroundByColor,
+  zoomScaleToSliderValue,
+} from './imageProcessing';
 
 const createImageData = (
   width: number,
@@ -23,6 +31,21 @@ const createImageData = (
 };
 
 describe('imageProcessing', () => {
+  it('maps zoom slider around 1x with finer control and stable roundtrip', () => {
+    expect(sliderValueToZoomScale(50)).toBeCloseTo(1, 4);
+    expect(sliderValueToZoomScale(0)).toBeCloseTo(0.05, 4);
+    expect(sliderValueToZoomScale(100)).toBeCloseTo(4, 4);
+
+    const nearLeft = sliderValueToZoomScale(49);
+    const nearRight = sliderValueToZoomScale(51);
+    expect(nearLeft).toBeGreaterThan(0.93);
+    expect(nearRight).toBeLessThan(1.05);
+
+    expect(zoomScaleToSliderValue(1)).toBeCloseTo(50, 4);
+    expect(zoomScaleToSliderValue(0.05)).toBeCloseTo(0, 4);
+    expect(zoomScaleToSliderValue(4)).toBeCloseTo(100, 4);
+  });
+
   it('preserves a concrete ImageData instance so browser canvas APIs accept the result', () => {
     class FakeImageData {
       width: number;
@@ -115,6 +138,73 @@ describe('imageProcessing', () => {
       bottom: 3,
       width: 3,
       height: 3,
+    });
+  });
+
+  it('removes edge-connected background by color for auto cutout on non-white backdrops', () => {
+    const imageData = createImageData(6, 6, (x, y) => {
+      if (x >= 2 && x <= 3 && y >= 2 && y <= 3) {
+        return { r: 230, g: 70, b: 60 };
+      }
+
+      return { r: 30, g: 140, b: 200 };
+    });
+
+    const cleaned = removeEdgeConnectedBackgroundByColor(imageData, 40);
+
+    const bgAlpha = cleaned.data[3];
+    const fgAlpha = cleaned.data[((2 * 6 + 2) * 4) + 3];
+    expect(bgAlpha).toBe(0);
+    expect(fgAlpha).toBe(255);
+  });
+
+  it('supports polygon line selection cutout in keep/remove modes', () => {
+    const imageData = createImageData(5, 5, () => ({ r: 40, g: 200, b: 120 }));
+    const polygon = [
+      { x: 1, y: 1 },
+      { x: 3, y: 1 },
+      { x: 3, y: 3 },
+      { x: 1, y: 3 },
+    ];
+
+    const kept = applyPolygonCutout(imageData, polygon, 'keep');
+    expect(kept.data[3]).toBe(0);
+    expect(kept.data[((2 * 5 + 2) * 4) + 3]).toBe(255);
+
+    const removed = applyPolygonCutout(imageData, polygon, 'remove');
+    expect(removed.data[3]).toBe(255);
+    expect(removed.data[((2 * 5 + 2) * 4) + 3]).toBe(0);
+  });
+
+  it('computes clipped crop source rect from preview transform', () => {
+    expect(
+      computeCropSourceRect(
+        { x: 20, y: 20, width: 200, height: 100 },
+        { x: -30, y: 10 },
+        2,
+        300,
+        200,
+      ),
+    ).toEqual({
+      sx: 25,
+      sy: 5,
+      sw: 100,
+      sh: 50,
+    });
+
+    expect(
+      computeCropSourceRect(
+        { x: 20, y: 20, width: 200, height: 100 },
+        { x: 100, y: 100 },
+        1,
+        300,
+        200,
+      ),
+    ).toEqual({
+      sx: 0,
+      sy: 0,
+      sw: 120,
+      sh: 20,
     });
   });
 });

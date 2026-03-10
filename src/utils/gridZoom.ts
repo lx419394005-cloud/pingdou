@@ -13,10 +13,14 @@ export const getCenteredCanvasOffset = (viewportSize: number, canvasSize: number
 export const shouldStartViewportPanning = ({
   button,
   isSpacePressed,
+  isCanvasTarget = true,
+  isPanMode = false,
 }: {
   button: number;
   isSpacePressed: boolean;
-}) => button === 1 || isSpacePressed;
+  isCanvasTarget?: boolean;
+  isPanMode?: boolean;
+}) => button === 1 || button === 2 || isSpacePressed || (button === 0 && (!isCanvasTarget || isPanMode));
 
 export const computeAnchoredScrollOffset = ({
   viewportSize,

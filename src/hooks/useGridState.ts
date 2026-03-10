@@ -30,6 +30,7 @@ import {
   type GridPoint,
   type ShapeTool,
 } from '../utils/pixelTools';
+import { applySelectionMove, getSelectionRectPoints, translateSelectionPoints } from '../utils/selectionTools';
 
 const DEFAULT_CONFIG: GridConfig = { width: 50, height: 50 };
 const INITIAL_LAYER_STATE = createInitialLayerState(DEFAULT_CONFIG.width, DEFAULT_CONFIG.height);
@@ -40,6 +41,20 @@ const cloneLayer = (layer: GridLayer): GridLayer => ({ ...layer, cells: cloneCel
 const cloneLayers = (layers: GridLayer[]) => layers.map(cloneLayer);
 const SHAPE_TOOLS = new Set<ShapeTool>(['line', 'rectangle', 'ellipse', 'triangle']);
 const isShapeTool = (tool: DrawMode): tool is ShapeTool => SHAPE_TOOLS.has(tool as ShapeTool);
+const pointKey = (point: GridPoint) => `${point.x},${point.y}`;
+const dedupePoints = (points: GridPoint[]) => {
+  const seen = new Set<string>();
+  const result: GridPoint[] = [];
+  for (const point of points) {
+    const key = pointKey(point);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(point);
+  }
+  return result;
+};
 
 export const useGridState = () => {
   const initialActiveLayer = getActiveLayer(INITIAL_LAYER_STATE);
@@ -56,9 +71,13 @@ export const useGridState = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [previewPoints, setPreviewPoints] = useState<GridPoint[]>([]);
   const [previewColor, setPreviewColor] = useState<GridCell>(null);
+  const [selectionPoints, setSelectionPointsState] = useState<GridPoint[]>([]);
+  const selectionPointsRef = useRef<GridPoint[]>([]);
   const activeStrokeRef = useRef<GridCell>(null);
   const activeToolRef = useRef<DrawMode | null>(null);
   const activeShapeRef = useRef<{ tool: ShapeTool; start: GridPoint } | null>(null);
+  const activeSelectionRef = useRef<{ start: GridPoint } | null>(null);
+  const activeMoveRef = useRef<{ anchor: GridPoint; sources: GridPoint[]; delta: GridPoint } | null>(null);
   const draftChangedRef = useRef(false);
   const gridStateRef = useRef<GridState>({
     config: DEFAULT_CONFIG,
@@ -94,6 +113,12 @@ export const useGridState = () => {
     });
   }, []);
 
+  const setSelectionPoints = useCallback((points: GridPoint[]) => {
+    const normalized = dedupePoints(points);
+    selectionPointsRef.current = normalized;
+    setSelectionPointsState(normalized);
+  }, []);
+
   const replaceGrid = useCallback((updater: (prev: GridState) => GridState) => {
     setGridState((prev) => {
       const next = updater(prev);
@@ -117,9 +142,10 @@ export const useGridState = () => {
         activeLayerId: snapshot.activeLayerId,
         cells: cloneCells(activeLayer.cells),
       }));
+      setSelectionPoints([]);
       return { ...prev, index: nextIndex };
     });
-  }, [replaceGrid]);
+  }, [replaceGrid, setSelectionPoints]);
 
   const redo = useCallback(() => {
     setHistoryState((prev) => {
@@ -136,9 +162,10 @@ export const useGridState = () => {
         activeLayerId: snapshot.activeLayerId,
         cells: cloneCells(activeLayer.cells),
       }));
+      setSelectionPoints([]);
       return { ...prev, index: nextIndex };
     });
-  }, [replaceGrid]);
+  }, [replaceGrid, setSelectionPoints]);
 
   const setResolution = useCallback((width: number, height: number) => {
     const nextLayerState = createInitialLayerState(width, height);
@@ -157,7 +184,8 @@ export const useGridState = () => {
       }],
       index: 0,
     });
-  }, [replaceGrid]);
+    setSelectionPoints([]);
+  }, [replaceGrid, setSelectionPoints]);
 
   const setPalette = useCallback((palette: ColorPalette) => {
     replaceGrid((prev) => ({ ...prev, palette }));
@@ -221,6 +249,45 @@ export const useGridState = () => {
   const handleMouseDown = useCallback((x: number, y: number) => {
     const clickedCell = gridStateRef.current.cells[y]?.[x] ?? null;
     const paletteColors = gridStateRef.current.palette?.colors ?? [];
+
+    if (drawMode === 'select') {
+      const start = { x, y };
+      activeToolRef.current = 'select';
+      activeSelectionRef.current = { start };
+      activeShapeRef.current = null;
+      activeMoveRef.current = null;
+      draftChangedRef.current = false;
+      setPreviewColor(null);
+      setPreviewPoints(getSelectionRectPoints(start, start, gridStateRef.current.config));
+      setIsDrawing(true);
+      return;
+    }
+
+    if (drawMode === 'move') {
+      const sources = selectionPointsRef.current;
+      if (sources.length === 0) {
+        return;
+      }
+
+      const sourceSet = new Set(sources.map(pointKey));
+      if (!sourceSet.has(pointKey({ x, y }))) {
+        return;
+      }
+
+      activeToolRef.current = 'move';
+      activeSelectionRef.current = null;
+      activeShapeRef.current = null;
+      activeMoveRef.current = {
+        anchor: { x, y },
+        sources,
+        delta: { x: 0, y: 0 },
+      };
+      draftChangedRef.current = false;
+      setPreviewColor(null);
+      setPreviewPoints(sources);
+      setIsDrawing(true);
+      return;
+    }
 
     if (drawMode === 'fill') {
       const fillColor = resolveWorkingColor();
@@ -308,6 +375,32 @@ export const useGridState = () => {
     }
 
     const activeTool = activeToolRef.current;
+    if (activeTool === 'select' && activeSelectionRef.current) {
+      const nextPreview = getSelectionRectPoints(
+        activeSelectionRef.current.start,
+        { x, y },
+        gridStateRef.current.config,
+      );
+      setPreviewPoints(nextPreview);
+      return;
+    }
+
+    if (activeTool === 'move' && activeMoveRef.current) {
+      const delta = {
+        x: x - activeMoveRef.current.anchor.x,
+        y: y - activeMoveRef.current.anchor.y,
+      };
+      activeMoveRef.current.delta = delta;
+      setPreviewPoints(
+        translateSelectionPoints(
+          activeMoveRef.current.sources,
+          delta,
+          gridStateRef.current.config,
+        ),
+      );
+      return;
+    }
+
     if (activeTool && isShapeTool(activeTool) && activeShapeRef.current) {
       const nextPreview = applyMirrorToPoints(
         getShapeCells(activeTool, activeShapeRef.current.start, { x, y }),
@@ -325,10 +418,51 @@ export const useGridState = () => {
   }, [applyPoints, isDrawing, mirrorMode, setPreviewPoints]);
 
   const handleMouseUp = useCallback(() => {
-    if (isDrawing) {
-      if (activeShapeRef.current) {
-        applyPoints(previewPoints, activeStrokeRef.current);
+    if (!isDrawing) {
+      return;
+    }
+
+    const activeTool = activeToolRef.current;
+    if (activeTool === 'select') {
+      setSelectionPoints(previewPoints);
+      setIsDrawing(false);
+      setPreviewPoints([]);
+      setPreviewColor(null);
+      activeStrokeRef.current = null;
+      activeToolRef.current = null;
+      activeShapeRef.current = null;
+      activeSelectionRef.current = null;
+      activeMoveRef.current = null;
+      return;
+    }
+
+    if (activeTool === 'move' && activeMoveRef.current) {
+      const moveResult = applySelectionMove(
+        gridStateRef.current.cells,
+        activeMoveRef.current.sources,
+        activeMoveRef.current.delta,
+        gridStateRef.current.config,
+      );
+
+      if (moveResult.changed) {
+        replaceGrid((prev) => {
+          const activeLayer = prev.layers.find((layer) => layer.id === prev.activeLayerId) ?? prev.layers[0];
+          if (!activeLayer) {
+            return prev;
+          }
+
+          const nextLayers = prev.layers.map((layer) => (
+            layer.id === activeLayer.id
+              ? { ...layer, cells: cloneCells(moveResult.cells) }
+              : layer
+          ));
+
+          draftChangedRef.current = true;
+          return { ...prev, layers: nextLayers, cells: cloneCells(moveResult.cells) };
+        });
       }
+
+      setSelectionPoints(moveResult.selection);
       commitHistoryIfChanged();
       setIsDrawing(false);
       setPreviewPoints([]);
@@ -336,8 +470,24 @@ export const useGridState = () => {
       activeStrokeRef.current = null;
       activeToolRef.current = null;
       activeShapeRef.current = null;
+      activeSelectionRef.current = null;
+      activeMoveRef.current = null;
+      return;
     }
-  }, [applyPoints, commitHistoryIfChanged, isDrawing, previewPoints, setIsDrawing, setPreviewColor, setPreviewPoints]);
+
+    if (activeShapeRef.current) {
+      applyPoints(previewPoints, activeStrokeRef.current);
+    }
+    commitHistoryIfChanged();
+    setIsDrawing(false);
+    setPreviewPoints([]);
+    setPreviewColor(null);
+    activeStrokeRef.current = null;
+    activeToolRef.current = null;
+    activeShapeRef.current = null;
+    activeSelectionRef.current = null;
+    activeMoveRef.current = null;
+  }, [applyPoints, commitHistoryIfChanged, isDrawing, previewPoints, replaceGrid, setIsDrawing, setPreviewColor, setPreviewPoints, setSelectionPoints]);
 
   const clearGrid = useCallback(() => {
     const newCells = Array(gridState.config.height).fill(null).map(() => Array(gridState.config.width).fill(null));
@@ -349,7 +499,8 @@ export const useGridState = () => {
       cells: newCells,
     }));
     pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
-  }, [gridState.config.height, gridState.config.width, pushHistory, replaceGrid]);
+    setSelectionPoints([]);
+  }, [gridState.config.height, gridState.config.width, pushHistory, replaceGrid, setSelectionPoints]);
 
   const loadGridData = useCallback((cells: GridCell[][], config?: GridConfig) => {
     const cloned = cloneCells(cells);
@@ -364,7 +515,8 @@ export const useGridState = () => {
       cells: cloned,
     }));
     pushHistory(nextLayerState.layers, nextLayerState.activeLayerId);
-  }, [pushHistory, replaceGrid]);
+    setSelectionPoints([]);
+  }, [pushHistory, replaceGrid, setSelectionPoints]);
 
   const addLayer = useCallback(() => {
     replaceGrid((prev) => {
@@ -394,7 +546,8 @@ export const useGridState = () => {
         cells: cloneCells(activeLayer.cells),
       };
     });
-  }, [replaceGrid]);
+    setSelectionPoints([]);
+  }, [replaceGrid, setSelectionPoints]);
 
   const toggleLayerVisibility = useCallback((layerId: string) => {
     replaceGrid((prev) => {
@@ -435,7 +588,8 @@ export const useGridState = () => {
       };
     });
     pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
-  }, [pushHistory, replaceGrid]);
+    setSelectionPoints([]);
+  }, [pushHistory, replaceGrid, setSelectionPoints]);
 
   const composedCells = useMemo(
     () => composeVisibleLayers(gridState.layers, gridState.config),
@@ -458,6 +612,7 @@ export const useGridState = () => {
     handleMouseUp,
     previewPoints,
     previewColor,
+    selectionPoints,
     clearGrid,
     loadGridData,
     addLayer,
