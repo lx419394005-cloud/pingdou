@@ -50,6 +50,7 @@ function App() {
     composedCells,
     selectedColor,
     setSelectedColor,
+    selectPaletteColor,
     drawMode,
     setDrawMode,
     mirrorMode,
@@ -210,8 +211,8 @@ function App() {
   };
 
   const handleSelectDrawingColor = (color: Color) => {
-    setSelectedColor(color);
-    if (!COLOR_DRIVEN_TOOLS.has(drawMode)) {
+    selectPaletteColor(color);
+    if (drawMode !== 'select-color' && !COLOR_DRIVEN_TOOLS.has(drawMode)) {
       setDrawMode('paint');
     }
   };

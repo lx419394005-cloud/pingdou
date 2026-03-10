@@ -1133,7 +1133,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 
         <div className="border-t border-[#eadfd0] pt-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0 whitespace-nowrap text-[10px] font-medium text-gray-500">
+            <div className="min-w-0 flex-1 text-[10px] font-medium leading-5 text-gray-500">
               提示：
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Ctrl/⌘ + 滚轮</kbd>
               缩放，
@@ -1159,7 +1159,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 updateFreePanOffset({ x: 0, y: 0 });
                 setManualZoom(null);
               }}
-              className="inline-flex items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
             >
               <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[9px] leading-none text-[#dd6b20]">
                 ⤢

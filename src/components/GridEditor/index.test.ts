@@ -92,7 +92,7 @@ describe('GridEditor', () => {
     );
 
     expect(html).toContain('aria-label="适应窗口"');
-    expect(html).toContain('inline-flex items-center gap-1 rounded-full');
+    expect(html).toContain('inline-flex shrink-0 items-center gap-1 rounded-full');
     expect(html).toContain('重置视图');
     expect(html).not.toContain('ml-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px]');
   });
@@ -142,5 +142,29 @@ describe('GridEditor', () => {
 
     expect(html).toContain('touch-action:pan-x');
     expect(html).toContain('overscroll-behavior-x:contain');
+  });
+
+  it('wraps the bottom hint text so the editor frame does not overflow horizontally', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        selectionPoints: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('min-w-0 flex-1 text-[10px] font-medium leading-5 text-gray-500');
+    expect(html).not.toContain('whitespace-nowrap text-[10px] font-medium text-gray-500');
   });
 });

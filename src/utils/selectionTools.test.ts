@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GridCell } from '../types';
-import { applySelectionMove, getSelectionRectPoints, translateSelectionPoints } from './selectionTools';
+import { applySelectionColor, applySelectionMove, getSelectionRectPoints, translateSelectionPoints } from './selectionTools';
 
 describe('selectionTools', () => {
   it('builds rectangle points regardless of drag direction', () => {
@@ -49,5 +49,27 @@ describe('selectionTools', () => {
     expect(result.cells[0][0]).toBeNull();
     expect(result.cells[1][1]?.hex).toBe('#111');
     expect(result.cells[2][2]?.hex).toBe('#222');
+  });
+
+  it('recolors the selected cells in one batch without touching other cells', () => {
+    const red = { name: 'Red', hex: '#f00', rgb: { r: 255, g: 0, b: 0 } };
+    const blue = { name: 'Blue', hex: '#00f', rgb: { r: 0, g: 0, b: 255 } };
+    const green = { name: 'Green', hex: '#0f0', rgb: { r: 0, g: 255, b: 0 } };
+    const cells: GridCell[][] = [
+      [red, blue],
+      [null, red],
+    ];
+
+    const result = applySelectionColor(
+      cells,
+      [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+      green,
+      { width: 2, height: 2 },
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.cells[0][0]?.hex).toBe('#0f0');
+    expect(result.cells[1][1]?.hex).toBe('#0f0');
+    expect(result.cells[0][1]?.hex).toBe('#00f');
   });
 });

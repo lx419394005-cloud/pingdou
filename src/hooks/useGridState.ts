@@ -22,6 +22,13 @@ import {
   toggleLayerVisibility as toggleLayerVisibilityState,
 } from './layerState';
 import {
+  createHistorySnapshot,
+  getRedoHistoryState,
+  getUndoHistoryState,
+  pushGridHistorySnapshot,
+  type HistoryState,
+} from './historyState';
+import {
   applyMirrorToPoints,
   clipPointsToGrid,
   getFloodFillCells,
@@ -30,7 +37,7 @@ import {
   type GridPoint,
   type ShapeTool,
 } from '../utils/pixelTools';
-import { applySelectionMove, getSelectionRectPoints, translateSelectionPoints } from '../utils/selectionTools';
+import { applySelectionColor, applySelectionMove, getSelectionRectPoints, translateSelectionPoints } from '../utils/selectionTools';
 
 const DEFAULT_CONFIG: GridConfig = { width: 50, height: 50 };
 const INITIAL_LAYER_STATE = createInitialLayerState(DEFAULT_CONFIG.width, DEFAULT_CONFIG.height);
@@ -99,30 +106,24 @@ export const useGridState = () => {
     activeLayerId: INITIAL_LAYER_STATE.activeLayerId,
   });
 
+  const initialHistoryState: HistoryState = {
+    snapshots: [createHistorySnapshot(INITIAL_LAYER_STATE.layers, INITIAL_LAYER_STATE.activeLayerId)],
+    index: 0,
+  };
   const [historyState, setHistoryState] = useState<{
     snapshots: Array<{ layers: GridLayer[]; activeLayerId: string }>;
     index: number;
-  }>({
-    snapshots: [{
-      layers: cloneLayers(INITIAL_LAYER_STATE.layers),
-      activeLayerId: INITIAL_LAYER_STATE.activeLayerId,
-    }],
-    index: 0,
-  });
+  }>(initialHistoryState);
+  const historyStateRef = useRef<HistoryState>(initialHistoryState);
 
   const pushHistory = useCallback((layers: GridLayer[], activeLayerId: string) => {
-    const snapshot = { layers: cloneLayers(layers), activeLayerId };
-    setHistoryState((prev) => {
-      const nextSnapshots = prev.snapshots.slice(0, prev.index + 1);
-      nextSnapshots.push(snapshot);
-      if (nextSnapshots.length > MAX_HISTORY) {
-        nextSnapshots.shift();
-      }
-      return {
-        snapshots: nextSnapshots,
-        index: nextSnapshots.length - 1,
-      };
-    });
+    const nextHistoryState = pushGridHistorySnapshot(
+      historyStateRef.current,
+      { layers, activeLayerId },
+      MAX_HISTORY,
+    );
+    historyStateRef.current = nextHistoryState;
+    setHistoryState(nextHistoryState);
   }, []);
 
   const setSelectionPoints = useCallback((points: GridPoint[]) => {
@@ -132,51 +133,46 @@ export const useGridState = () => {
   }, []);
 
   const replaceGrid = useCallback((updater: (prev: GridState) => GridState) => {
-    setGridState((prev) => {
-      const next = updater(prev);
-      gridStateRef.current = next;
-      return next;
-    });
-  }, [setGridState]);
+    const next = updater(gridStateRef.current);
+    gridStateRef.current = next;
+    setGridState(next);
+    return next;
+  }, []);
 
   const undo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (prev.index <= 0) {
-        return prev;
-      }
+    const result = getUndoHistoryState(historyStateRef.current);
+    if (!result) {
+      return;
+    }
 
-      const nextIndex = prev.index - 1;
-      const snapshot = prev.snapshots[nextIndex];
-      const activeLayer = getActiveLayer(snapshot);
-      replaceGrid((current) => ({
-        ...current,
-        layers: cloneLayers(snapshot.layers),
-        activeLayerId: snapshot.activeLayerId,
-        cells: cloneCells(activeLayer.cells),
-      }));
-      setSelectionPoints([]);
-      return { ...prev, index: nextIndex };
-    });
+    historyStateRef.current = result.history;
+    setHistoryState(result.history);
+    const activeLayer = getActiveLayer(result.snapshot);
+    replaceGrid((current) => ({
+      ...current,
+      layers: cloneLayers(result.snapshot.layers),
+      activeLayerId: result.snapshot.activeLayerId,
+      cells: cloneCells(activeLayer.cells),
+    }));
+    setSelectionPoints([]);
   }, [replaceGrid, setSelectionPoints]);
 
   const redo = useCallback(() => {
-    setHistoryState((prev) => {
-      if (prev.index >= prev.snapshots.length - 1) {
-        return prev;
-      }
+    const result = getRedoHistoryState(historyStateRef.current);
+    if (!result) {
+      return;
+    }
 
-      const nextIndex = prev.index + 1;
-      const snapshot = prev.snapshots[nextIndex];
-      const activeLayer = getActiveLayer(snapshot);
-      replaceGrid((current) => ({
-        ...current,
-        layers: cloneLayers(snapshot.layers),
-        activeLayerId: snapshot.activeLayerId,
-        cells: cloneCells(activeLayer.cells),
-      }));
-      setSelectionPoints([]);
-      return { ...prev, index: nextIndex };
-    });
+    historyStateRef.current = result.history;
+    setHistoryState(result.history);
+    const activeLayer = getActiveLayer(result.snapshot);
+    replaceGrid((current) => ({
+      ...current,
+      layers: cloneLayers(result.snapshot.layers),
+      activeLayerId: result.snapshot.activeLayerId,
+      cells: cloneCells(activeLayer.cells),
+    }));
+    setSelectionPoints([]);
   }, [replaceGrid, setSelectionPoints]);
 
   const setResolution = useCallback((width: number, height: number) => {
@@ -189,13 +185,11 @@ export const useGridState = () => {
       activeLayerId: nextLayerState.activeLayerId,
       cells: cloneCells(activeLayer.cells),
     }));
-    setHistoryState({
-      snapshots: [{
-        layers: cloneLayers(nextLayerState.layers),
-        activeLayerId: nextLayerState.activeLayerId,
-      }],
+    historyStateRef.current = {
+      snapshots: [createHistorySnapshot(nextLayerState.layers, nextLayerState.activeLayerId)],
       index: 0,
-    });
+    };
+    setHistoryState(historyStateRef.current);
     setSelectionPoints([]);
   }, [replaceGrid, setSelectionPoints]);
 
@@ -203,6 +197,50 @@ export const useGridState = () => {
     replaceGrid((prev) => ({ ...prev, palette }));
     setSelectedColor((current) => resolveSelectedColorForPalette(current, palette.colors));
   }, [replaceGrid, setSelectedColor]);
+
+  const selectPaletteColor = useCallback((color: Color) => {
+    const currentSelection = selectionPointsRef.current;
+    if (drawMode !== 'select-color' || currentSelection.length === 0) {
+      setSelectedColor(color);
+      return;
+    }
+
+    let didChange = false;
+    replaceGrid((prev) => {
+      const activeLayer = prev.layers.find((layer) => layer.id === prev.activeLayerId) ?? prev.layers[0];
+      if (!activeLayer) {
+        return prev;
+      }
+
+      const recolorResult = applySelectionColor(
+        activeLayer.cells,
+        currentSelection,
+        color,
+        prev.config,
+      );
+      if (!recolorResult.changed) {
+        return prev;
+      }
+
+      didChange = true;
+      const nextLayers = prev.layers.map((layer) => (
+        layer.id === activeLayer.id
+          ? { ...layer, cells: recolorResult.cells.map((row) => [...row]) }
+          : layer
+      ));
+
+      return {
+        ...prev,
+        layers: nextLayers,
+        cells: recolorResult.cells.map((row) => [...row]),
+      };
+    });
+
+    setSelectedColor(color);
+    if (didChange) {
+      pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
+    }
+  }, [drawMode, pushHistory, replaceGrid]);
 
   const applyPoints = useCallback((points: GridPoint[], color: GridCell) => {
     let didChange = false;
@@ -602,7 +640,8 @@ export const useGridState = () => {
         cells: cloneCells(activeLayer.cells),
       };
     });
-  }, [replaceGrid]);
+    pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
+  }, [pushHistory, replaceGrid]);
 
   const removeLayer = useCallback((layerId: string) => {
     replaceGrid((prev) => {
@@ -629,6 +668,7 @@ export const useGridState = () => {
     composedCells,
     selectedColor,
     setSelectedColor,
+    selectPaletteColor,
     drawMode,
     setDrawMode,
     setResolution,

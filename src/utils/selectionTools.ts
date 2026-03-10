@@ -106,3 +106,31 @@ export const applySelectionMove = (
     selection: nextSelection,
   };
 };
+
+export const applySelectionColor = (
+  cells: GridCell[][],
+  selectedPoints: GridPoint[],
+  color: GridCell,
+  config: GridConfig,
+) => {
+  const normalizedSelection = dedupePoints(
+    selectedPoints.filter((point) => isPointInBounds(point, config)),
+  );
+  const nextCells = cells.map((row) => [...row]);
+  let changed = false;
+
+  for (const point of normalizedSelection) {
+    const current = nextCells[point.y]?.[point.x] ?? null;
+    if (current?.hex === color?.hex) {
+      continue;
+    }
+
+    nextCells[point.y][point.x] = color;
+    changed = true;
+  }
+
+  return {
+    changed,
+    cells: nextCells,
+  };
+};
