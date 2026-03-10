@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ColorPalette } from './components/ColorPalette';
 import { GridEditor, type EditorViewMode } from './components/GridEditor';
 import { ImageProcessor } from './components/ImageProcessor';
@@ -794,7 +794,7 @@ function App() {
                             </svg>
                           ),
                         },
-                      ] as Array<{ mode: MirrorMode; label: string; icon: JSX.Element }>).map(({ mode, label, icon }) => (
+                      ] as Array<{ mode: MirrorMode; label: string; icon: ReactNode }>).map(({ mode, label, icon }) => (
                         <button
                           key={mode}
                           type="button"
