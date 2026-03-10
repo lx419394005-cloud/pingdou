@@ -55,6 +55,18 @@ const dedupePoints = (points: GridPoint[]) => {
   }
   return result;
 };
+const getSameColorPoints = (cells: GridCell[][], colorHex: string) => {
+  const points: GridPoint[] = [];
+  for (let y = 0; y < cells.length; y += 1) {
+    const row = cells[y];
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x]?.hex === colorHex) {
+        points.push({ x, y });
+      }
+    }
+  }
+  return points;
+};
 
 export const useGridState = () => {
   const initialActiveLayer = getActiveLayer(INITIAL_LAYER_STATE);
@@ -286,6 +298,22 @@ export const useGridState = () => {
       setPreviewColor(null);
       setPreviewPoints(sources);
       setIsDrawing(true);
+      return;
+    }
+
+    if (drawMode === 'select-color') {
+      const target = gridStateRef.current.cells[y]?.[x] ?? null;
+      if (!target) {
+        setSelectionPoints([]);
+        setPreviewPoints([]);
+        setPreviewColor(null);
+        return;
+      }
+
+      setSelectionPoints(getSameColorPoints(gridStateRef.current.cells, target.hex));
+      setSelectedColor(target);
+      setPreviewPoints([]);
+      setPreviewColor(null);
       return;
     }
 

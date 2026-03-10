@@ -8,6 +8,8 @@ import { collectLayerFilledPoints } from './hooks/layerState';
 import type { AlgorithmMode, ColorPalette as ColorPaletteType, Color, DrawMode, MirrorMode } from './types';
 import mardPalette from './data/colorCards/mard.json';
 import { getImportImageSizeError, isImportImageSizeValid } from './utils/importImage';
+import { findNearestPaletteColor, sampleOverlayColor } from './utils/colorMatch';
+import { BRAND_DESCRIPTION, BRAND_GITHUB_URL, BRAND_NAME, BRAND_SHORT_NAME, BRAND_TAGLINE } from './config/brand';
 
 const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle']);
 const DRAW_MODE_LABELS: Record<DrawMode, string> = {
@@ -16,6 +18,7 @@ const DRAW_MODE_LABELS: Record<DrawMode, string> = {
   pick: '取色',
   erase: '橡皮擦',
   select: '框选',
+  'select-color': '同色选取',
   move: '移动',
   pan: '平移',
   line: '直线',
@@ -77,12 +80,21 @@ function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
-  const [isAboutCardCollapsed, setIsAboutCardCollapsed] = useState(false);
+  const [isAboutCardCollapsed, setIsAboutCardCollapsed] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'edit' | 'palette'>('edit');
   const [isPaletteCollapsed, setIsPaletteCollapsed] = useState(false);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
+  const [customProjectTitle, setCustomProjectTitle] = useState<string | null>(null);
+  const [isProjectTitleEditing, setIsProjectTitleEditing] = useState(false);
+  const [projectTitleDraft, setProjectTitleDraft] = useState('');
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  const overlaySamplerRef = useRef<{
+    src: string;
+    width: number;
+    height: number;
+    data: Uint8ClampedArray;
+  } | null>(null);
   const [importStatus, setImportStatus] = useState<{
     sourceName: string | null;
     algorithmMode: AlgorithmMode;
@@ -237,30 +249,149 @@ function App() {
     event.target.value = '';
   };
 
+  const paletteColors = gridState.palette?.colors ?? [];
+
+  const loadOverlaySampler = async (src: string) => {
+    const image = new Image();
+    const loaded = await new Promise<HTMLImageElement | null>((resolve) => {
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = src;
+    });
+    if (!loaded) {
+      return null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, loaded.naturalWidth || loaded.width);
+    canvas.height = Math.max(1, loaded.naturalHeight || loaded.height);
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+    context.drawImage(loaded, 0, 0, canvas.width, canvas.height);
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      src,
+      width: canvas.width,
+      height: canvas.height,
+      data: imageData.data,
+    };
+  };
+
+  const handleEditorMouseDown = (x: number, y: number) => {
+    if (drawMode !== 'pick' || viewMode !== 'overlay' || !overlayImage || paletteColors.length === 0) {
+      handleMouseDown(x, y);
+      return;
+    }
+
+    void (async () => {
+      let sampler = overlaySamplerRef.current;
+      if (!sampler || sampler.src !== overlayImage) {
+        sampler = await loadOverlaySampler(overlayImage);
+        if (!sampler) {
+          handleMouseDown(x, y);
+          return;
+        }
+        overlaySamplerRef.current = sampler;
+      }
+
+      const rgb = sampleOverlayColor(sampler, x, y, gridState.config);
+      const nearest = findNearestPaletteColor(rgb, paletteColors);
+      if (!nearest) {
+        handleMouseDown(x, y);
+        return;
+      }
+
+      setSelectedColor(nearest);
+      setDrawMode('paint');
+    })();
+  };
+
   const currentRenderLabel = importStatus.algorithmMode === 'legacy-nearest' ? '最近色直出' : '主体清理优先';
   const activeLayer = gridState.layers.find((layer) => layer.id === gridState.activeLayerId) ?? null;
   const visibleLayerCount = gridState.layers.filter((layer) => layer.visible).length;
-  const projectTitle = importStatus.sourceName ?? '未命名工程';
+  const projectTitle = customProjectTitle ?? importStatus.sourceName ?? `${BRAND_SHORT_NAME}的新图纸`;
+
+  const beginProjectTitleEdit = () => {
+    setProjectTitleDraft(projectTitle);
+    setIsProjectTitleEditing(true);
+  };
+
+  const commitProjectTitleEdit = () => {
+    const trimmed = projectTitleDraft.trim();
+    if (!trimmed) {
+      setCustomProjectTitle(null);
+      setProjectTitleDraft('');
+      setIsProjectTitleEditing(false);
+      return;
+    }
+    setCustomProjectTitle(trimmed);
+    setProjectTitleDraft(trimmed);
+    setIsProjectTitleEditing(false);
+  };
+
+  const cancelProjectTitleEdit = () => {
+    setProjectTitleDraft(projectTitle);
+    setIsProjectTitleEditing(false);
+  };
 
   return (
     <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#fdf8ee_0%,#f2e8d8_42%,#ecdfcd_100%)] text-gray-800">
       <header className="sticky top-0 z-20 border-b border-[#e8dbc8] bg-white/94 backdrop-blur">
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#dd6b20] text-white">
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border-2 border-[#9a4a16] bg-[#f08a34] text-white shadow-[0_10px_24px_rgba(212,96,29,0.18)]">
+              <svg className="h-7 w-7" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                <path d="M17 26c0-9.4 7.6-17 17-17 5.8 0 10.3 1.9 13.7 5.8 3.6 4 5.3 8.8 5.3 14.8 0 10.9-8.7 19.4-20 19.4-6.9 0-11.5-1.8-15.1-5.8L11 48l3.7-8.1A21 21 0 0 1 17 26Z" fill="#7fd6c5" stroke="#9a4a16" strokeWidth="4" strokeLinejoin="round"/>
+                <path d="M29 13l4.2-7 5.4 8.2" fill="#f9d27c" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M42 14l6.8-4.3-1.2 8.8" fill="#f9d27c" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="29" cy="28" r="3.7" fill="#1f2937"/>
+                <circle cx="43" cy="28" r="3.7" fill="#1f2937"/>
+                <path d="M31 40c2.1 1.7 4.2 2.4 6.4 2.4 2.2 0 4.2-.7 6.2-2.4" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round"/>
+                <circle cx="23.5" cy="36.5" r="2.5" fill="#f7a6b8"/>
+                <circle cx="49.5" cy="36.5" r="2.5" fill="#f7a6b8"/>
+                <path d="M18.5 20.5 23 17" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round"/>
               </svg>
             </div>
             <div>
-              <h1 className="text-[25px] font-black tracking-tight text-gray-900">拼豆图纸工作台</h1>
-              <p className="text-xs font-medium text-gray-500">裁切、提取主体、编辑图纸、导出完整方案</p>
+              <h1 className="text-[25px] font-black tracking-tight text-gray-900">{BRAND_NAME}</h1>
+              <p className="text-xs font-medium text-gray-500">{BRAND_DESCRIPTION}</p>
             </div>
           </div>
 
           <div className="hidden min-w-0 rounded-2xl border border-[#efe3d2] bg-[#fbf7f0] px-3 py-2 md:block">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-gray-700">
-              <span className="truncate">工程：{projectTitle}</span>
+              {isProjectTitleEditing ? (
+                <label className="flex min-w-0 items-center gap-1">
+                  <span>工程：</span>
+                  <input
+                    autoFocus
+                    value={projectTitleDraft}
+                    onChange={(event) => setProjectTitleDraft(event.target.value)}
+                    onBlur={commitProjectTitleEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitProjectTitleEdit();
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelProjectTitleEdit();
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-orange-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-gray-800 outline-none ring-0 focus:border-orange-400"
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  onDoubleClick={beginProjectTitleEdit}
+                  title="双击修改工程名"
+                  className="truncate text-left"
+                >
+                  工程：{projectTitle}
+                </button>
+              )}
               <span className="text-gray-400">|</span>
               <span>模式：{currentRenderLabel}</span>
               <span className="text-gray-400">|</span>
@@ -268,17 +399,10 @@ function App() {
               <span className="text-gray-400">|</span>
               <span className="truncate">当前：{activeLayer?.name ?? '无'}</span>
             </div>
-            <p className="mt-1 text-[10px] font-medium text-gray-500">提示：悬停图层可快速阅览该层像素内容</p>
+            <p className="mt-1 text-[10px] font-medium text-gray-500">提示：悬停图层可快速预览单层内容，方便检查描线和补豆。</p>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsAboutModalOpen(true)}
-              className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-bold text-gray-700 transition hover:bg-gray-50"
-            >
-              About
-            </button>
             <button
               type="button"
               onClick={requestImportImage}
@@ -326,8 +450,8 @@ function App() {
             <div className="rounded-[26px] border border-[#e8dcc8] bg-white/96 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-black text-gray-800">参考图阅览</h3>
-                  <p className="text-[11px] font-medium text-gray-500">当前调节后的参考图位置</p>
+                  <h3 className="text-sm font-black text-gray-800">参考图舞台</h3>
+                  <p className="text-[11px] font-medium text-gray-500">查看当前裁切、缩放后的构图位置</p>
                 </div>
                 <button
                   type="button"
@@ -437,7 +561,7 @@ function App() {
                     <span className="font-semibold text-gray-800">{stats.uniqueColors}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span>生图模式</span>
+                    <span>生成策略</span>
                     <span className="truncate font-semibold text-gray-800">{currentRenderLabel}</span>
                   </div>
                 </div>
@@ -456,7 +580,7 @@ function App() {
                 previewColor={previewColor}
                 drawMode={drawMode}
                 onDrawModeChange={setDrawMode}
-                onCellMouseDown={handleMouseDown}
+                onCellMouseDown={handleEditorMouseDown}
                 onCellMouseEnter={handleMouseEnter}
                 onGlobalMouseUp={handleMouseUp}
                 onSelectColor={(color) => {
@@ -612,26 +736,85 @@ function App() {
                     <div className="mb-2 text-[10px] font-bold tracking-[0.2em] text-gray-400">镜像方向</div>
                     <div className="grid grid-cols-4 gap-2">
                       {([
-                        ['none', '关闭'],
-                        ['vertical', '左右'],
-                        ['horizontal', '上下'],
-                        ['quad', '四向'],
-                      ] as Array<[MirrorMode, string]>).map(([mode, label]) => (
+                        {
+                          mode: 'none',
+                          label: '关闭',
+                          icon: (
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M5 5l14 14" />
+                              <path d="M19 5L5 19" />
+                            </svg>
+                          ),
+                        },
+                        {
+                          mode: 'vertical',
+                          label: '左右',
+                          icon: (
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 4v16" />
+                              <path d="M4 12h6" />
+                              <path d="M20 12h-6" />
+                              <path d="M4 12l3-3" />
+                              <path d="M4 12l3 3" />
+                              <path d="M20 12l-3-3" />
+                              <path d="M20 12l-3 3" />
+                            </svg>
+                          ),
+                        },
+                        {
+                          mode: 'horizontal',
+                          label: '上下',
+                          icon: (
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M4 12h16" />
+                              <path d="M12 4v6" />
+                              <path d="M12 20v-6" />
+                              <path d="M12 4l-3 3" />
+                              <path d="M12 4l3 3" />
+                              <path d="M12 20l-3-3" />
+                              <path d="M12 20l3-3" />
+                            </svg>
+                          ),
+                        },
+                        {
+                          mode: 'quad',
+                          label: '四向',
+                          icon: (
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 3v18" />
+                              <path d="M3 12h18" />
+                              <path d="M12 3l-2 2" />
+                              <path d="M12 3l2 2" />
+                              <path d="M12 21l-2-2" />
+                              <path d="M12 21l2-2" />
+                              <path d="M3 12l2-2" />
+                              <path d="M3 12l2 2" />
+                              <path d="M21 12l-2-2" />
+                              <path d="M21 12l-2 2" />
+                            </svg>
+                          ),
+                        },
+                      ] as Array<{ mode: MirrorMode; label: string; icon: JSX.Element }>).map(({ mode, label, icon }) => (
                         <button
                           key={mode}
                           type="button"
                           onClick={() => setMirrorMode(mode)}
-                          className={`rounded-xl px-2 py-2 text-xs font-bold transition ${
+                          title={label}
+                          aria-label={label}
+                          className={`group relative inline-flex h-8 items-center justify-center rounded-xl px-2 transition ${
                             mirrorMode === mode ? 'bg-[#8d5a24] text-white' : 'border border-gray-200 bg-white text-gray-700'
                           }`}
                         >
-                          {label}
+                          {icon}
+                          <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                            {label}
+                          </span>
                         </button>
                       ))}
                     </div>
                   </div>
                   <p className="mt-2 text-[11px] leading-5 text-gray-500">
-                    主工具在画布底部；撤销重做请使用顶栏快捷操作。
+                    主工具在画布底部；顶栏负责导入与撤销重做，适合连续修稿。
                   </p>
                 </div>
 
@@ -672,8 +855,16 @@ function App() {
             <div className="rounded-2xl border border-[#e8dcc8] bg-white px-3 py-2.5">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">ABOUT</div>
-                  <div className="mt-0.5 text-xs font-black text-gray-800">拼豆图纸工作台</div>
+                  <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">BRAND NOTE</div>
+                  <div className="mt-0.5 text-xs font-black text-gray-800">{BRAND_NAME}</div>
+                  <a
+                    href={BRAND_GITHUB_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 block text-[10px] font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
+                  >
+                    GitHub: lx419394005-cloud/pingdou
+                  </a>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="rounded-full bg-[#fff3e6] px-2 py-0.5 text-[10px] font-black text-[#c45a12]">{APP_VERSION}</span>
@@ -681,7 +872,7 @@ function App() {
                     type="button"
                     onClick={() => setIsAboutCardCollapsed((prev) => !prev)}
                     className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50"
-                    aria-label={isAboutCardCollapsed ? '展开 About' : '收起 About'}
+                    aria-label={isAboutCardCollapsed ? '展开品牌说明' : '收起品牌说明'}
                     title={isAboutCardCollapsed ? '展开' : '收起'}
                   >
                     <svg className={`h-3.5 w-3.5 transition ${isAboutCardCollapsed ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -693,7 +884,18 @@ function App() {
               {!isAboutCardCollapsed && (
                 <>
                   <p className="mt-1.5 text-[11px] leading-5 text-gray-600">
-                    从图片到图纸的一站式流程：裁切导入、调色、图层编辑、选区搬移与导出清单。
+                    {BRAND_TAGLINE}。{BRAND_SHORT_NAME}把常用的抠图、配色、图层修整和导出清单整合在一个桌面工作区里。
+                  </p>
+                  <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                    仓库地址：
+                    <a
+                      href={BRAND_GITHUB_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-1 font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
+                    >
+                      {BRAND_GITHUB_URL}
+                    </a>
                   </p>
                   <button
                     type="button"
@@ -724,8 +926,8 @@ function App() {
             >
               <div className="flex items-center justify-between border-b border-[#efe3d2] px-5 py-3.5">
                 <div>
-                  <h2 className="text-lg font-black text-gray-900">导入图片并生成图纸</h2>
-                  <p className="text-xs text-gray-500">在这个窗口里完成裁切、缩放、去白底和颜色设置</p>
+                  <h2 className="text-lg font-black text-gray-900">导入图片，生成 {BRAND_SHORT_NAME} 的图纸稿</h2>
+                  <p className="text-xs text-gray-500">在这里完成裁切、缩放、去白底与颜色设置，再送进主编辑区微调</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -778,8 +980,8 @@ function App() {
           >
             <div className="flex items-start justify-between border-b border-[#efe3d2] px-5 py-4">
               <div>
-                <h2 className="text-lg font-black text-gray-900">关于拼豆图纸工作台</h2>
-                <p className="text-xs text-gray-500">完整的拼豆图纸生成与编辑网页工具</p>
+                <h2 className="text-lg font-black text-gray-900">关于 {BRAND_NAME}</h2>
+                <p className="text-xs text-gray-500">{BRAND_TAGLINE}</p>
               </div>
               <button
                 type="button"
@@ -792,17 +994,17 @@ function App() {
 
             <div className="grid gap-3 p-5 md:grid-cols-2">
               <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
-                <h3 className="text-sm font-black text-gray-800">它能做什么</h3>
+                <h3 className="text-sm font-black text-gray-800">这套工具负责什么</h3>
                 <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
-                  <li>导入图片并裁切，自动转成拼豆网格。</li>
-                  <li>像素/标号/临摹三种视图自由切换。</li>
-                  <li>多图层编辑，支持框选、移动选区、镜像绘制。</li>
-                  <li>导出颜色统计与制作清单，便于落地制作。</li>
+                  <li>把参考图整理成适合落地制作的拼豆图纸，不必在多个工具之间反复切换。</li>
+                  <li>保留像素、标号、临摹三种视图，方便从排版检查切到实际制作视角。</li>
+                  <li>提供多图层修稿、框选搬移、镜像绘制，适合角色图和对称图案。</li>
+                  <li>一并导出颜色统计、工程文件与图纸预览，减少备料和返工。</li>
                 </ul>
               </div>
 
               <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
-                <h3 className="text-sm font-black text-gray-800">快捷操作</h3>
+                <h3 className="text-sm font-black text-gray-800">常用快捷操作</h3>
                 <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
                   <li>撤销：Ctrl/⌘ + Z，重做：Shift + Ctrl/⌘ + Z</li>
                   <li>平移：双指滚动 / 右键拖拽 / Space + 拖拽</li>
@@ -814,8 +1016,19 @@ function App() {
               <div className="rounded-2xl border border-[#eadfd0] bg-white p-3 md:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-black text-gray-800">版本信息</h3>
-                    <p className="mt-1 text-[12px] text-gray-600">当前版本 {APP_VERSION}，专注于桌面端拼豆图纸制作流程。</p>
+                    <h3 className="text-sm font-black text-gray-800">品牌与版本</h3>
+                    <p className="mt-1 text-[12px] text-gray-600">{BRAND_NAME} 由 {BRAND_SHORT_NAME} 命名维护，当前版本 {APP_VERSION}，专注桌面端拼豆图纸制作流程。</p>
+                    <p className="mt-2 text-[12px] text-gray-600">
+                      GitHub：
+                      <a
+                        href={BRAND_GITHUB_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-1 font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
+                      >
+                        lx419394005-cloud/pingdou
+                      </a>
+                    </p>
                   </div>
                   <button
                     type="button"

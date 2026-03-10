@@ -105,6 +105,21 @@ const TOOL_BUTTONS: Array<{
     ),
   },
   {
+    mode: 'select-color',
+    label: '同色选取',
+    group: 'select',
+    activeClass: 'bg-violet-700 text-white',
+    icon: () => (
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="10.5" cy="10.5" r="5.5" />
+        <path d="M15 15l5 5" />
+        <circle cx="9" cy="9" r="1" />
+        <circle cx="12" cy="11.5" r="1" />
+        <circle cx="8" cy="12.5" r="0.8" />
+      </svg>
+    ),
+  },
+  {
     mode: 'pan',
     label: '视图平移',
     group: 'draw',
@@ -910,6 +925,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               平移，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">框选+移动</kbd>
               搬移内容，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">同色选取</kbd>
+              一键选同色，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">平移工具</kbd>
               左键拖拽，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Space + 拖拽</kbd>

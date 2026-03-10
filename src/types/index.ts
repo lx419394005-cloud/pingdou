@@ -39,6 +39,7 @@ export type DrawMode =
   | 'pick'
   | 'fill'
   | 'select'
+  | 'select-color'
   | 'move'
   | 'pan'
   | 'line'

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Loong Bead Studio icon">
+  <rect width="64" height="64" rx="18" fill="#fff7ec"/>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="#f08a34" stroke="#9a4a16" stroke-width="2.5"/>
+  <path d="M17 26c0-9.4 7.6-17 17-17 5.8 0 10.3 1.9 13.7 5.8 3.6 4 5.3 8.8 5.3 14.8 0 10.9-8.7 19.4-20 19.4-6.9 0-11.5-1.8-15.1-5.8L11 48l3.7-8.1A21 21 0 0 1 17 26Z" fill="#7fd6c5" stroke="#9a4a16" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M29 13l4.2-7 5.4 8.2" fill="#f9d27c" stroke="#9a4a16" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M42 14l6.8-4.3-1.2 8.8" fill="#f9d27c" stroke="#9a4a16" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="29" cy="28" r="3.7" fill="#1f2937"/>
+  <circle cx="43" cy="28" r="3.7" fill="#1f2937"/>
+  <path d="M31 40c2.1 1.7 4.2 2.4 6.4 2.4 2.2 0 4.2-.7 6.2-2.4" stroke="#9a4a16" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="23.5" cy="36.5" r="2.5" fill="#f7a6b8"/>
+  <circle cx="49.5" cy="36.5" r="2.5" fill="#f7a6b8"/>
+  <path d="M18.5 20.5 23 17" stroke="#9a4a16" stroke-width="4" stroke-linecap="round"/>
+</svg>

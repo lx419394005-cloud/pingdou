@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GridState } from '../../types';
 import { buildColorLabelMap, buildIndexedPalette, getDisplayCode } from '../../utils/pattern';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
+import { BRAND_EXPORT_PREFIX, BRAND_SHORT_NAME } from '../../config/brand';
 
 interface ExportPanelProps {
   gridState: GridState;
@@ -67,7 +68,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
 
     ctx.fillStyle = '#1f2937';
     ctx.font = '900 28px sans-serif';
-    ctx.fillText('拼豆图纸', PADDING, 38);
+    ctx.fillText(`${BRAND_EXPORT_PREFIX}图纸`, PADDING, 38);
     ctx.font = '600 13px sans-serif';
     ctx.fillStyle = '#6b7280';
     ctx.fillText(`尺寸 ${width} × ${height} | 总豆数 ${totalBeans} | 颜色数 ${indexedPalette.length}`, PADDING, 62);
@@ -212,7 +213,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
 
     downloadBlob(
       new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }),
-      `拼豆图纸-${Date.now()}.json`,
+      `${BRAND_EXPORT_PREFIX}工程-${Date.now()}.json`,
     );
   };
 
@@ -222,12 +223,12 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
       ...indexedPalette.map((entry) => `${getDisplayCode(entry.code, entry.color.name)},${entry.color.name},${entry.color.hex},${entry.count}`),
     ].join('\n');
 
-    downloadBlob(new Blob([content], { type: 'text/csv;charset=utf-8' }), `拼豆清单-${Date.now()}.csv`);
+    downloadBlob(new Blob([content], { type: 'text/csv;charset=utf-8' }), `${BRAND_EXPORT_PREFIX}清单-${Date.now()}.csv`);
   };
 
   const exportAll = async () => {
-    await exportPattern('color', '像素图纸');
-    await exportPattern('number', '标号图纸');
+    await exportPattern('color', `${BRAND_EXPORT_PREFIX}-像素图纸`);
+    await exportPattern('number', `${BRAND_EXPORT_PREFIX}-标号图纸`);
     exportCsv();
     exportJson();
   };
@@ -236,8 +237,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
     <div className="rounded-[28px] border border-[#eadfd0] bg-white p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-black text-gray-800">图纸导出</h3>
-          <p className="text-xs text-gray-500">导出完整图纸、编号图例和用量清单</p>
+          <h3 className="text-sm font-black text-gray-800">{BRAND_SHORT_NAME}出图</h3>
+          <p className="text-xs text-gray-500">导出完整图纸、编号图例和备料清单，便于直接开做</p>
         </div>
         <span className="rounded-full bg-teal-50 px-2 py-1 text-[10px] font-bold text-teal-700">
           {gridState.config.width} × {gridState.config.height}
@@ -363,13 +364,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
 
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => exportPattern('color', '像素图纸')}
+                onClick={() => exportPattern('color', `${BRAND_EXPORT_PREFIX}-像素图纸`)}
                 className="rounded-xl bg-gray-900 px-3 py-2 text-xs font-black text-white transition hover:bg-black"
               >
                 导出像素图纸
               </button>
               <button
-                onClick={() => exportPattern('number', '标号图纸')}
+                onClick={() => exportPattern('number', `${BRAND_EXPORT_PREFIX}-标号图纸`)}
                 className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-700 transition hover:bg-gray-50"
               >
                 导出标号图纸
