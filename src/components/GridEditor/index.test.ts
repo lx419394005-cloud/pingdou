@@ -96,4 +96,51 @@ describe('GridEditor', () => {
     expect(html).toContain('重置视图');
     expect(html).not.toContain('ml-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px]');
   });
+
+  it('disables native touch gestures on the viewport so touch dragging can pan the canvas', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        selectionPoints: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('touch-action:none');
+  });
+
+  it('allows horizontal touch panning on the tool scroller even when tool buttons have tooltips', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        selectionPoints: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('touch-action:pan-x');
+    expect(html).toContain('overscroll-behavior-x:contain');
+  });
 });

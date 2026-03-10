@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { clampZoom, computeAnchoredScrollOffset, getCenteredCanvasOffset, shouldStartViewportPanning, stepZoom } from './gridZoom';
+import {
+  clampZoom,
+  computeAnchoredScrollOffset,
+  getCenteredCanvasOffset,
+  getTouchDistance,
+  getTouchMidpoint,
+  shouldStartViewportPanning,
+  stepZoom,
+} from './gridZoom';
 
 describe('gridZoom', () => {
   it('clamps zoom values into the supported range', () => {
@@ -42,5 +50,19 @@ describe('gridZoom', () => {
     expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: false })).toBe(true);
     expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: true })).toBe(false);
     expect(shouldStartViewportPanning({ button: 0, isSpacePressed: false, isCanvasTarget: true, isPanMode: true })).toBe(true);
+  });
+
+  it('measures pinch distance between two touch points', () => {
+    expect(getTouchDistance(
+      { clientX: 0, clientY: 0 },
+      { clientX: 3, clientY: 4 },
+    )).toBe(5);
+  });
+
+  it('finds the midpoint for pinch anchoring', () => {
+    expect(getTouchMidpoint(
+      { clientX: 10, clientY: 20 },
+      { clientX: 30, clientY: 50 },
+    )).toEqual({ x: 20, y: 35 });
   });
 });

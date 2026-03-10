@@ -337,11 +337,11 @@ function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#fdf8ee_0%,#f2e8d8_42%,#ecdfcd_100%)] text-gray-800">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,#fdf8ee_0%,#f2e8d8_42%,#ecdfcd_100%)] text-gray-800 lg:h-screen lg:overflow-hidden">
       <header className="sticky top-0 z-20 border-b border-[#e8dbc8] bg-white/94 backdrop-blur">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 sm:px-5 md:grid-cols-[auto_minmax(0,1fr)_auto]">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border-2 border-[#9a4a16] bg-[#f08a34] text-white shadow-[0_10px_24px_rgba(212,96,29,0.18)]">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border-2 border-[#9a4a16] bg-[#f08a34] text-white shadow-[0_10px_24px_rgba(212,96,29,0.18)] sm:h-11 sm:w-11">
               <svg className="h-7 w-7" viewBox="0 0 64 64" fill="none" aria-hidden="true">
                 <path d="M17 26c0-9.4 7.6-17 17-17 5.8 0 10.3 1.9 13.7 5.8 3.6 4 5.3 8.8 5.3 14.8 0 10.9-8.7 19.4-20 19.4-6.9 0-11.5-1.8-15.1-5.8L11 48l3.7-8.1A21 21 0 0 1 17 26Z" fill="#7fd6c5" stroke="#9a4a16" strokeWidth="4" strokeLinejoin="round"/>
                 <path d="M29 13l4.2-7 5.4 8.2" fill="#f9d27c" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -354,9 +354,9 @@ function App() {
                 <path d="M18.5 20.5 23 17" stroke="#9a4a16" strokeWidth="4" strokeLinecap="round"/>
               </svg>
             </div>
-            <div>
-              <h1 className="text-[25px] font-black tracking-tight text-gray-900">{BRAND_NAME}</h1>
-              <p className="text-xs font-medium text-gray-500">{BRAND_DESCRIPTION}</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-[21px] font-black tracking-tight text-gray-900 sm:text-[25px]">{BRAND_NAME}</h1>
+              <p className="truncate text-[11px] font-medium text-gray-500 sm:text-xs">{BRAND_DESCRIPTION}</p>
             </div>
           </div>
 
@@ -402,13 +402,14 @@ function App() {
             <p className="mt-1 text-[10px] font-medium text-gray-500">提示：悬停图层可快速预览单层内容，方便检查描线和补豆。</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={requestImportImage}
-              className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-[11px] font-bold text-orange-700 transition hover:bg-orange-100"
+              className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-[11px] font-bold text-orange-700 transition hover:bg-orange-100 sm:px-3"
             >
-              导入图片
+              <span className="sm:hidden">导入</span>
+              <span className="hidden sm:inline">导入图片</span>
             </button>
             <button
               type="button"
@@ -442,12 +443,29 @@ function App() {
             </button>
           </div>
         </div>
+
+        <div className="border-t border-[#f1e6d8] px-3 py-2 md:hidden">
+          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+            <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
+              工程：{projectTitle}
+            </span>
+            <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
+              模式：{currentRenderLabel}
+            </span>
+            <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
+              图层：{visibleLayerCount}/{gridState.layers.length}
+            </span>
+            <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
+              当前：{activeLayer?.name ?? '无'}
+            </span>
+          </div>
+        </div>
       </header>
 
-      <main className="grid h-[calc(100vh-5.8rem)] grid-cols-[minmax(0,1fr)_336px] gap-3 px-3 py-3">
-        <section className="flex min-h-0 min-w-0 flex-col gap-3">
-          <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)] gap-3">
-            <div className="rounded-[26px] border border-[#e8dcc8] bg-white/96 p-3">
+      <main className="flex min-h-0 flex-col gap-3 overflow-y-auto px-3 py-3 lg:grid lg:h-[calc(100vh-5.8rem)] lg:grid-cols-[minmax(0,1fr)_336px] lg:overflow-hidden">
+        <section className="order-1 flex min-h-0 min-w-0 flex-col gap-3 lg:order-none">
+          <div className="flex min-h-0 flex-col gap-3 lg:grid lg:h-full lg:grid-cols-[240px_minmax(0,1fr)]">
+            <div className="order-2 rounded-[26px] border border-[#e8dcc8] bg-white/96 p-3 lg:order-none">
               <div className="mb-2 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-black text-gray-800">参考图舞台</h3>
@@ -471,14 +489,14 @@ function App() {
                   <img
                     src={importPreviewImage}
                     alt="参考图预览"
-                    className="block h-[220px] w-full object-contain"
+                    className="block h-[180px] w-full object-contain sm:h-[220px]"
                   />
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={requestImportImage}
-                  className="flex h-[220px] w-full items-center justify-center rounded-[20px] border-2 border-dashed border-[#dcc9ae] bg-[linear-gradient(180deg,#faf8f3_0%,#f6f0e6_100%)] text-sm font-black text-[#8d5a24] transition hover:border-orange-400 hover:bg-orange-50"
+                  className="flex h-[180px] w-full items-center justify-center rounded-[20px] border-2 border-dashed border-[#dcc9ae] bg-[linear-gradient(180deg,#faf8f3_0%,#f6f0e6_100%)] text-sm font-black text-[#8d5a24] transition hover:border-orange-400 hover:bg-orange-50 sm:h-[220px]"
                 >
                   导入参考图
                 </button>
@@ -568,7 +586,7 @@ function App() {
               </div>
             </div>
 
-            <div className="h-full min-h-0 overflow-hidden">
+            <div className="order-1 min-h-[52vh] overflow-hidden sm:min-h-[60vh] lg:order-none lg:h-full lg:min-h-0">
                 <GridEditor
                   gridState={composedGridState}
                   hoverLayerPreview={hoveredLayerPreview}
@@ -592,7 +610,7 @@ function App() {
           </div>
         </section>
 
-        <aside className="flex h-full flex-col overflow-hidden rounded-[28px] border border-[#e8dcc8] bg-white/97">
+        <aside className="order-2 flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-[#e8dcc8] bg-white/97 lg:order-none lg:h-full">
           <div className="grid grid-cols-2 gap-2 border-b border-[#efe3d2] p-3">
             <button
               type="button"
@@ -919,28 +937,28 @@ function App() {
       >
           <div className="mx-auto flex h-full max-w-[1080px] items-center justify-center">
             <div
-              className={`flex h-full max-h-[86vh] w-full flex-col overflow-hidden rounded-[30px] border border-[#eadfd0] bg-[#fffaf2] transition ${
+              className={`flex h-full max-h-[92vh] w-full flex-col overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:max-h-[86vh] md:rounded-[30px] ${
                 isImportModalOpen ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
               }`}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="flex items-center justify-between border-b border-[#efe3d2] px-5 py-3.5">
+              <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <div>
                   <h2 className="text-lg font-black text-gray-900">导入图片，生成 {BRAND_SHORT_NAME} 的图纸稿</h2>
                   <p className="text-xs text-gray-500">在这里完成裁切、缩放、去白底与颜色设置，再送进主编辑区微调</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex w-full items-center gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={requestImportImage}
-                    className="rounded-full border border-orange-200 bg-orange-50 px-3.5 py-1.5 text-xs font-bold text-orange-700 transition hover:bg-orange-100"
+                    className="flex-1 rounded-full border border-orange-200 bg-orange-50 px-3.5 py-1.5 text-xs font-bold text-orange-700 transition hover:bg-orange-100 sm:flex-none"
                   >
                     更换图片
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsImportModalOpen(false)}
-                    className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                    className="flex-1 rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50 sm:flex-none"
                   >
                     关闭
                   </button>
@@ -973,12 +991,12 @@ function App() {
       >
         <div className="mx-auto flex h-full max-w-[920px] items-center justify-center">
           <div
-            className={`w-full max-w-3xl overflow-hidden rounded-[30px] border border-[#eadfd0] bg-[#fffaf2] transition ${
+            className={`w-full max-w-3xl overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:rounded-[30px] ${
               isAboutModalOpen ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
             }`}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between border-b border-[#efe3d2] px-5 py-4">
+            <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-lg font-black text-gray-900">关于 {BRAND_NAME}</h2>
                 <p className="text-xs text-gray-500">{BRAND_TAGLINE}</p>
@@ -986,13 +1004,13 @@ function App() {
               <button
                 type="button"
                 onClick={() => setIsAboutModalOpen(false)}
-                className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                className="w-full rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50 sm:w-auto"
               >
                 关闭
               </button>
             </div>
 
-            <div className="grid gap-3 p-5 md:grid-cols-2">
+            <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-2">
               <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
                 <h3 className="text-sm font-black text-gray-800">这套工具负责什么</h3>
                 <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">

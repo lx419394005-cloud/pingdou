@@ -10,6 +10,19 @@ export const stepZoom = (zoom: number, direction: 'in' | 'out') => clampZoom(
 
 export const getCenteredCanvasOffset = (viewportSize: number, canvasSize: number) => Math.max(0, (viewportSize - canvasSize) / 2);
 
+export const getTouchDistance = (
+  first: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number },
+) => Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+
+export const getTouchMidpoint = (
+  first: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number },
+) => ({
+  x: (first.clientX + second.clientX) / 2,
+  y: (first.clientY + second.clientY) / 2,
+});
+
 export const shouldStartViewportPanning = ({
   button,
   isSpacePressed,

@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Color, DrawMode, GridState } from '../../types';
 import { buildColorLabelMap } from '../../utils/pattern';
-import { clampZoom, computeAnchoredScrollOffset, shouldStartViewportPanning, stepZoom } from '../../utils/gridZoom';
+import {
+  clampZoom,
+  computeAnchoredScrollOffset,
+  getTouchDistance,
+  getTouchMidpoint,
+  shouldStartViewportPanning,
+  stepZoom,
+} from '../../utils/gridZoom';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
 
 export type EditorViewMode = 'color' | 'number' | 'overlay';
@@ -240,6 +247,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     canScrollX: boolean;
     canScrollY: boolean;
   } | null>(null);
+  const touchPointerIdRef = useRef<number | null>(null);
+  const pinchGestureRef = useRef<{ baseDistance: number; baseZoom: number } | null>(null);
+  const activeTouchPointsRef = useRef(new Map<number, { clientX: number; clientY: number }>());
   const spacePressedRef = useRef(false);
   const freePanOffsetRef = useRef({ x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -632,7 +642,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
-  const handleViewportWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+  const handleViewportWheel = useCallback((event: WheelEvent) => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
@@ -718,7 +728,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       viewport.scrollLeft = nextScrollLeft;
       viewport.scrollTop = nextScrollTop;
     });
-  };
+  }, [canScrollX, canScrollY, canvasHeight, canvasWidth, cellSize, fitZoom, gutter, height, manualZoom, updateFreePanOffset, viewMode, width]);
 
   const handleViewportMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
@@ -749,6 +759,136 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       canScrollY,
     };
     setIsPanning(true);
+  };
+
+  const startViewportPanning = useCallback((clientX: number, clientY: number, viewport: HTMLDivElement) => {
+    panStartRef.current = {
+      x: clientX,
+      y: clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      offsetX: freePanOffsetRef.current.x,
+      offsetY: freePanOffsetRef.current.y,
+      canScrollX,
+      canScrollY,
+    };
+    setIsPanning(true);
+  }, [canScrollX, canScrollY]);
+
+  const stopViewportPanning = useCallback(() => {
+    panStartRef.current = null;
+    touchPointerIdRef.current = null;
+    setIsPanning(false);
+  }, []);
+
+  const getActiveTouchPair = useCallback(() => {
+    const points = Array.from(activeTouchPointsRef.current.values());
+    if (points.length < 2) {
+      return null;
+    }
+
+    return [points[0]!, points[1]!] as const;
+  }, []);
+
+  const startPinchGesture = useCallback(() => {
+    const touchPair = getActiveTouchPair();
+    if (!touchPair) {
+      pinchGestureRef.current = null;
+      return;
+    }
+
+    const [firstTouch, secondTouch] = touchPair;
+    pinchGestureRef.current = {
+      baseDistance: Math.max(1, getTouchDistance(firstTouch, secondTouch)),
+      baseZoom: manualZoom ?? fitZoom,
+    };
+    stopViewportPanning();
+  }, [fitZoom, getActiveTouchPair, manualZoom, stopViewportPanning]);
+
+  const applyPinchZoom = useCallback((viewport: HTMLDivElement) => {
+    const touchPair = getActiveTouchPair();
+    const pinchGesture = pinchGestureRef.current;
+    if (!touchPair || !pinchGesture) {
+      return;
+    }
+
+    const [firstTouch, secondTouch] = touchPair;
+    const distance = getTouchDistance(firstTouch, secondTouch);
+    if (distance <= 0) {
+      return;
+    }
+
+    const nextZoom = clampZoom(pinchGesture.baseZoom * (distance / pinchGesture.baseDistance));
+    if (Math.abs(nextZoom - zoom) < 0.001) {
+      return;
+    }
+
+    if (freePanOffsetRef.current.x !== 0 || freePanOffsetRef.current.y !== 0) {
+      updateFreePanOffset({ x: 0, y: 0 });
+    }
+
+    const midpoint = getTouchMidpoint(firstTouch, secondTouch);
+    const rect = viewport.getBoundingClientRect();
+    const cursorOffsetX = midpoint.x - rect.left;
+    const cursorOffsetY = midpoint.y - rect.top;
+    const nextCellSize = Math.max(4, Math.floor(BASE_CELL_SIZE * nextZoom));
+    const nextGutter = viewMode === 'color' ? 0 : Math.max(24, Math.floor(nextCellSize * 1.5));
+    const nextCanvasWidth = nextGutter + (width * nextCellSize) + 1;
+    const nextCanvasHeight = nextGutter + (height * nextCellSize) + 1;
+    const nextScrollLeft = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientWidth,
+      cursorOffset: cursorOffsetX,
+      scrollOffset: viewport.scrollLeft,
+      previousCanvasSize: canvasWidth,
+      nextCanvasSize: nextCanvasWidth,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
+    const nextScrollTop = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientHeight,
+      cursorOffset: cursorOffsetY,
+      scrollOffset: viewport.scrollTop,
+      previousCanvasSize: canvasHeight,
+      nextCanvasSize: nextCanvasHeight,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
+
+    setManualZoom(nextZoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = nextScrollLeft;
+      viewport.scrollTop = nextScrollTop;
+    });
+  }, [canvasHeight, canvasWidth, cellSize, getActiveTouchPair, gutter, height, updateFreePanOffset, viewMode, width, zoom]);
+
+  const handleViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    activeTouchPointsRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+
+    if (activeTouchPointsRef.current.size === 1) {
+      touchPointerIdRef.current = event.pointerId;
+      startViewportPanning(event.clientX, event.clientY, viewport);
+      return;
+    }
+
+    if (activeTouchPointsRef.current.size === 2) {
+      startPinchGesture();
+    }
   };
 
   const applyPanFromPointer = useCallback((clientX: number, clientY: number) => {
@@ -788,9 +928,81 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   };
 
   const stopPanning = useCallback(() => {
-    panStartRef.current = null;
-    setIsPanning(false);
-  }, []);
+    pinchGestureRef.current = null;
+    stopViewportPanning();
+  }, [stopViewportPanning]);
+
+  const handleViewportPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+
+    if (!activeTouchPointsRef.current.has(event.pointerId)) {
+      return;
+    }
+
+    activeTouchPointsRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    if (activeTouchPointsRef.current.size >= 2) {
+      if (!pinchGestureRef.current) {
+        startPinchGesture();
+      }
+      applyPinchZoom(viewport);
+      return;
+    }
+
+    if (touchPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    applyPanFromPointer(event.clientX, event.clientY);
+  };
+
+  const handleViewportPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+
+    activeTouchPointsRef.current.delete(event.pointerId);
+
+    if (activeTouchPointsRef.current.size === 0) {
+      stopPanning();
+      return;
+    }
+
+    if (activeTouchPointsRef.current.size === 1) {
+      pinchGestureRef.current = null;
+      const viewport = viewportRef.current;
+      const [remainingPointerId, remainingPoint] = Array.from(activeTouchPointsRef.current.entries())[0]!;
+      if (viewport) {
+        touchPointerIdRef.current = remainingPointerId;
+        startViewportPanning(remainingPoint.clientX, remainingPoint.clientY, viewport);
+      }
+      return;
+    }
+
+    startPinchGesture();
+  };
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const onWheel = (event: WheelEvent) => handleViewportWheel(event);
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, [handleViewportWheel]);
 
   useEffect(() => {
     if (!isPanning) {
@@ -834,12 +1046,15 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       <div className="relative h-full min-h-0">
         <div
           ref={viewportRef}
-          onWheel={handleViewportWheel}
           onMouseDown={handleViewportMouseDown}
           onMouseMove={handleViewportMouseMove}
           onMouseUp={stopPanning}
+          onPointerDown={handleViewportPointerDown}
+          onPointerMove={handleViewportPointerMove}
+          onPointerUp={handleViewportPointerUp}
+          onPointerCancel={handleViewportPointerUp}
           className="h-full min-h-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
-          style={{ scrollbarGutter: 'stable both-edges' }}
+          style={{ scrollbarGutter: 'stable both-edges', touchAction: 'none' }}
         >
           <div className="flex min-h-full min-w-full w-max">
             <canvas
@@ -884,7 +1099,10 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         </div>
       </div>
       <div className="grid gap-2 rounded-[22px] border border-[#eadfd0] bg-[#faf6ef]/96 px-3 py-2.5 backdrop-blur-sm">
-        <div className="-mb-6 overflow-x-auto pb-6 no-scrollbar">
+        <div
+          className="-mb-6 overflow-x-auto pb-6 no-scrollbar"
+          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
+        >
           <div className="flex w-max items-center gap-2 pr-1">
             {TOOL_GROUPS.map((group) => (
               <div key={group.id} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-[#eadfd0] bg-white/70 px-1.5 py-1">
@@ -918,6 +1136,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             <div className="min-w-0 whitespace-nowrap text-[10px] font-medium text-gray-500">
               提示：
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Ctrl/⌘ + 滚轮</kbd>
+              缩放，
+              <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">双指捏合</kbd>
               缩放，
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">双指滚动</kbd>
               平移，
