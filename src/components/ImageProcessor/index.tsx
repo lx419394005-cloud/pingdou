@@ -371,10 +371,10 @@ const getToolIcon = (id: ToolButtonId, className = 'h-4 w-4') => {
   if (id === 'crop') {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M7 3v10a4 4 0 004 4h10" />
-        <path d="M17 3v4" />
-        <path d="M3 7h4" />
-        <path d="M14 14l7 7" />
+        <path d="M4 4h6v2H6v4H4V4z" />
+        <path d="M20 4v6h-2V6h-4V4h6z" />
+        <path d="M4 20v-6h2v4h4v2H4z" />
+        <path d="M14 20h6v-6h-2v4h-4v2z" />
       </svg>
     );
   }
@@ -782,9 +782,9 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     setCanUndoEdit(editHistoryRef.current.length > 0);
     applyImageDataUpdate(previous, {
       fitToSubjectAfter: false,
-      nextMode: 'move',
+      nextMode: editMode === 'brush-restore' || editMode === 'brush-remove' ? editMode : 'move',
     });
-  }, [applyImageDataUpdate]);
+  }, [applyImageDataUpdate, editMode]);
 
   const handleConfirmCrop = useCallback(() => {
     if (!cropBox) {
@@ -813,6 +813,19 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     setCropBox(getInitialFreeCropBox(image.width, image.height, subjectBounds));
     setEditMode('move');
   }, [image, subjectBounds]);
+
+  const handleConfirmBrush = useCallback(() => {
+    setEditMode('move');
+    resetBrushState();
+  }, [resetBrushState]);
+
+  const handleCancelSelection = useCallback(() => {
+    if (editMode === 'crop') {
+      handleCancelCrop();
+    } else if (editMode === 'brush-restore' || editMode === 'brush-remove') {
+      handleConfirmBrush();
+    }
+  }, [editMode, handleCancelCrop, handleConfirmBrush]);
 
   const processGrid = useCallback((options?: {
     targetColorsOverride?: number;
@@ -1043,6 +1056,25 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   useEffect(() => {
     drawPreview();
   }, [drawPreview]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (!image) return;
+        
+        event.preventDefault();
+        
+        if (dragState) {
+          setDragState(null);
+        } else if (editMode === 'crop' || editMode === 'brush-restore' || editMode === 'brush-remove') {
+          handleCancelSelection();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dragState, editMode, handleCancelSelection, image]);
 
   useEffect(() => {
     if (!onPreviewChange) {
@@ -1441,15 +1473,24 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   };
 
   const modeHint = editMode === 'crop'
-    ? '拖拽四边或四角做自由裁切，确认后进入 50x50 画布编辑'
+    ? '拖拽四边或四角调整裁切范围'
     : editMode === 'move'
-      ? '拖动画布位置，滚轮或滑块细调缩放'
+      ? '拖动画布调整位置，滚轮或滑块缩放'
       : editMode === 'brush-restore'
-        ? '在被删掉的区域刷一笔，系统按源图颜色与连通区域把内容补回来'
-        : '在背景上刷一笔，系统按相近颜色与连通区域扩张删除';
+        ? '在需要恢复的区域涂抹，自动按源图颜色恢复内容'
+        : editMode === 'brush-remove'
+          ? '在需要删除的背景区域涂抹，自动清理相近颜色'
+          : '选择工具开始抠图修整';
 
   return (
-    <div className={isModal ? 'h-full' : 'rounded-[28px] border border-[#eadfd0] bg-white p-4 shadow-[0_20px_60px_rgba(146,95,37,0.08)]'}>
+    <div 
+      className={isModal ? 'h-full' : 'rounded-[28px] border border-[#eadfd0] bg-white p-4 shadow-[0_20px_60px_rgba(146,95,37,0.08)]'}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && image && (editMode === 'crop' || editMode === 'brush-restore' || editMode === 'brush-remove')) {
+          handleCancelSelection();
+        }
+      }}
+    >
       {!palette ? (
         <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-4 text-center text-xs text-gray-400">
           请先载入豆子色卡
@@ -1521,40 +1562,69 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
 
                     <p className="mt-2 text-center text-[11px] leading-5 text-gray-500">{modeHint}</p>
 
-                    {editMode === 'crop' ? (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={handleConfirmCrop}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-[12px] font-bold text-orange-700 transition hover:bg-orange-100"
-                        >
-                          {getMiniIcon('check')}
-                          OK，应用自由裁切
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCancelCrop}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 text-[12px] font-bold text-gray-700 transition hover:bg-gray-50"
-                        >
-                          {getMiniIcon('close')}
-                          取消裁切
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={() => fitToSubject()}
-                          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-[12px] font-bold text-orange-700 transition hover:bg-orange-100"
-                        >
-                          {getToolIcon('auto-cutout', 'h-4 w-4')}
-                          主体适配到阅览窗口
-                        </button>
-                      </div>
-                    )}
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {editMode === 'crop' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleConfirmCrop}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-[12px] font-bold text-orange-700 transition hover:bg-orange-100"
+                          >
+                            {getMiniIcon('check')}
+                            确认裁切
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelCrop}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 text-[12px] font-bold text-gray-700 transition hover:bg-gray-50"
+                          >
+                            {getMiniIcon('close')}
+                            取消裁切
+                          </button>
+                        </>
+                      ) : editMode === 'brush-restore' || editMode === 'brush-remove' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleConfirmBrush}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-bold text-emerald-700 transition hover:bg-emerald-50"
+                          >
+                            {getMiniIcon('check')}
+                            完成抠图
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditMode('move')}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 text-[12px] font-bold text-gray-700 transition hover:bg-gray-50"
+                          >
+                            {getMiniIcon('close')}
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => fitToSubject()}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-[12px] font-bold text-orange-700 transition hover:bg-orange-100"
+                          >
+                            {getToolIcon('auto-cutout', 'h-4 w-4')}
+                            主体适配
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditMode('crop')}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] font-bold text-amber-700 transition hover:bg-amber-50"
+                          >
+                            {getToolIcon('crop', 'h-4 w-4')}
+                            自由裁切
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  {editMode !== 'crop' && (
+                  {editMode !== 'crop' && editMode !== 'brush-restore' && editMode !== 'brush-remove' && (
                     <div className={`rounded-2xl border border-gray-100 bg-gray-50 ${isModal ? 'p-2.5' : 'p-3'}`}>
                       <div className="mb-2 flex items-center justify-between text-xs font-bold text-gray-500">
                         <span>画布缩放</span>
@@ -1578,8 +1648,8 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                   <div className="rounded-[24px] border border-[#ebe0cf] bg-white p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-black text-gray-800">画布工具</div>
-                        <p className="mt-1 text-[11px] leading-5 text-gray-500">移动是默认状态；这里只保留需要显式切换的操作工具。</p>
+                        <div className="text-xs font-black text-gray-800">抠图工具</div>
+                        <p className="mt-1 text-[11px] leading-5 text-gray-500">先用"自动识别"快速抠出主体，再用笔刷精细修整。</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {IMAGE_PROCESSOR_HISTORY_ACTIONS.map((action) => (
@@ -1599,13 +1669,13 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                           </button>
                         ))}
                         <span className="rounded-full bg-[#fff3e6] px-2 py-1 text-[10px] font-black text-[#c45a12]">
-                          {editMode === 'crop' ? '自由裁切中' : '50x50 画布编辑'}
+                          {editMode === 'crop' ? '裁切中' : editMode === 'brush-restore' || editMode === 'brush-remove' ? '抠图修整中' : '画布编辑'}
                         </span>
                       </div>
                     </div>
 
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {IMAGE_PROCESSOR_TOOL_BUTTONS.map((button) => (
+                      {IMAGE_PROCESSOR_TOOL_BUTTONS.filter((button) => !(isModal && button.id === 'crop')).map((button) => (
                         <button
                           key={button.id}
                           type="button"
@@ -1620,8 +1690,12 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
 
                     <div className="mt-3 rounded-2xl border border-dashed border-[#eadcca] bg-[#fcf8f1] px-3 py-2 text-[11px] leading-5 text-gray-600">
                       {editMode === 'crop'
-                        ? '进入自由裁切后，直接在左侧预览窗口下方确认即可；确认后默认回到移动画布。'
-                        : '先用“自动识别”快速抠出主体，再用删除/恢复笔刷修正边缘；点“撤销”可以回到上一步抠图状态。'}
+                        ? '拖拽四边或四角调整裁切范围，完成后点"确认裁切"。'
+                        : editMode === 'brush-restore'
+                          ? '在需要恢复的区域涂抹，松开鼠标即可自动恢复；点"完成抠图"退出。'
+                          : editMode === 'brush-remove'
+                            ? '在需要删除的背景区域涂抹，松开鼠标即可自动清理；点"完成抠图"退出。'
+                            : '点击工具开始抠图修整，"撤销"可回退上一步操作。'}
                     </div>
                   </div>
 

@@ -727,6 +727,7 @@ export const useGridState = () => {
     previewPoints,
     previewColor,
     selectionPoints,
+    setSelectionPoints,
     clearGrid,
     loadGridData,
     addLayer,

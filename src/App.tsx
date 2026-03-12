@@ -11,7 +11,7 @@ import { getImportImageSizeError, isImportImageSizeValid } from './utils/importI
 import { findNearestPaletteColor, sampleOverlayColor } from './utils/colorMatch';
 import { parseGridJsonPayload, parseGridJsonText } from './utils/gridJsonImport';
 import { MAX_TARGET_COLORS, MIN_TARGET_COLORS } from './algorithms/kMeans';
-import { BRAND_DESCRIPTION, BRAND_GITHUB_URL, BRAND_NAME, BRAND_SHORT_NAME, BRAND_TAGLINE } from './config/brand';
+import { BRAND_DESCRIPTION, BRAND_GITHUB_URL, BRAND_NAME, BRAND_SHORT_NAME, BRAND_XIAOHONGSHU_URL, BRAND_XIAOHONGSHU_LABEL } from './config/brand';
 
 const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle', 'text']);
 const DRAW_MODE_LABELS: Record<DrawMode, string> = {
@@ -35,7 +35,7 @@ const MIRROR_MODE_LABELS: Record<MirrorMode, string> = {
   horizontal: '上下',
   quad: '四向',
 };
-const APP_VERSION = 'v0.2.0';
+const APP_VERSION = 'v0.1.0-beta';
 type ImportRenderMode = AlgorithmMode | 'json-import';
 type ImportColorControlState = {
   hasImage: boolean;
@@ -74,6 +74,7 @@ function App() {
     previewPoints,
     previewColor,
     selectionPoints,
+    setSelectionPoints,
     loadGridData,
     addLayer,
     setActiveLayer,
@@ -241,11 +242,20 @@ function App() {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') {
+      if (isEditableTarget(event.target)) {
         return;
       }
 
-      if (isEditableTarget(event.target)) {
+      if (event.key === 'Escape' && (drawMode === 'select' || drawMode === 'move' || drawMode === 'select-color')) {
+        event.preventDefault();
+        if (selectionPoints.length > 0) {
+          setSelectionPoints([]);
+        }
+        setDrawMode('paint');
+        return;
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') {
         return;
       }
 
@@ -264,7 +274,7 @@ function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canRedo, canUndo, redo, undo]);
+  }, [canRedo, canUndo, drawMode, redo, selectionPoints.length, setDrawMode, setSelectionPoints, undo]);
 
   const handlePaletteLoad = (palette: { id: string; name: string; brand: string; colors: { name: string; hex: string; rgb: { r: number; g: number; b: number } }[] }) => {
     setPalette(palette);
@@ -333,11 +343,8 @@ function App() {
     importFileInputRef.current?.click();
   };
 
-  const requestImportJson = () => {
-    importJsonInputRef.current?.click();
-  };
-
-  const openJsonPasteModal = () => {
+  const openJsonImportModal = () => {
+    setJsonImportDraft('');
     setIsJsonPasteModalOpen(true);
   };
 
@@ -574,7 +581,7 @@ function App() {
                   type="button"
                   onDoubleClick={beginProjectTitleEdit}
                   title="双击修改工程名"
-                  className="truncate text-left"
+                  className="max-w-[180px] truncate text-left"
                 >
                   工程：{projectTitle}
                 </button>
@@ -600,19 +607,11 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={requestImportJson}
+              onClick={openJsonImportModal}
               className="rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-bold text-teal-700 transition hover:bg-teal-100 sm:px-3"
             >
               <span className="sm:hidden">JSON</span>
               <span className="hidden sm:inline">导入 JSON</span>
-            </button>
-            <button
-              type="button"
-              onClick={openJsonPasteModal}
-              className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-700 transition hover:bg-sky-100 sm:px-3"
-            >
-              <span className="sm:hidden">粘贴</span>
-              <span className="hidden sm:inline">粘贴 JSON</span>
             </button>
             <button
               type="button"
@@ -649,7 +648,7 @@ function App() {
 
         <div className="border-t border-[#f1e6d8] px-3 py-2 md:hidden">
           <div className="flex gap-2 overflow-x-auto no-scrollbar">
-            <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
+            <span className="max-w-[120px] shrink-0 truncate rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
               工程：{projectTitle}
             </span>
             <span className="shrink-0 rounded-full border border-[#eadfd0] bg-[#fbf7f0] px-3 py-1 text-[11px] font-semibold text-gray-700">
@@ -915,6 +914,15 @@ function App() {
             </div>
 
             <div className="order-1 min-h-[52vh] overflow-hidden sm:min-h-[60vh] lg:order-none lg:h-full lg:min-h-0">
+                <div
+                  className="h-full w-full"
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget && selectionPoints.length > 0 && (drawMode === 'select' || drawMode === 'move' || drawMode === 'select-color')) {
+                      setSelectionPoints([]);
+                      setDrawMode('paint');
+                    }
+                  }}
+                >
                 <GridEditor
                   gridState={composedGridState}
                   hoverLayerPreview={hoveredLayerPreview}
@@ -946,6 +954,7 @@ function App() {
                   setDrawMode('paint');
                 }}
               />
+              </div>
             </div>
           </div>
         </section>
@@ -1297,17 +1306,36 @@ function App() {
           <div className="border-t border-[#efe3d2] bg-[#fbf7f0] px-3 py-2.5">
             <div className="rounded-2xl border border-[#e8dcc8] bg-white px-3 py-2.5">
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">BRAND NOTE</div>
                   <div className="mt-0.5 text-xs font-black text-gray-800">{BRAND_NAME}</div>
-                  <a
-                    href={BRAND_GITHUB_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 block text-[10px] font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
-                  >
-                    GitHub: lx419394005-cloud/pingdou
-                  </a>
+                  <div className="mt-1 flex items-center gap-2">
+                    <a
+                      href={BRAND_GITHUB_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
+                      title="GitHub 仓库"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                      </svg>
+                      <span>GitHub</span>
+                    </a>
+                    <span className="text-gray-300">|</span>
+                    <a
+                      href={BRAND_XIAOHONGSHU_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-600 underline decoration-rose-200 underline-offset-2"
+                      title="小红书主页"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.766 7.82c.82 0 1.484.664 1.484 1.484V16.8c0 .82-.664 1.484-1.484 1.484H6.234c-.82 0-1.484-.664-1.484-1.484V9.304c0-.82.664-1.484 1.484-1.484h11.532z" />
+                      </svg>
+                      <span>{BRAND_XIAOHONGSHU_LABEL}</span>
+                    </a>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="rounded-full bg-[#fff3e6] px-2 py-0.5 text-[10px] font-black text-[#c45a12]">{APP_VERSION}</span>
@@ -1327,23 +1355,14 @@ function App() {
               {!isAboutCardCollapsed && (
                 <>
                   <p className="mt-1.5 text-[11px] leading-5 text-gray-600">
-                    {BRAND_TAGLINE}。{BRAND_SHORT_NAME}把常用的抠图、配色、图层修整和导出清单整合在一个桌面工作区里。
+          
+                     <p>常用的抠图、配色、图层修整和导出清单整合在一个桌面工作区里</p>
                   </p>
-                  <p className="mt-2 text-[11px] leading-5 text-gray-500">
-                    仓库地址：
-                    <a
-                      href={BRAND_GITHUB_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-1 font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
-                    >
-                      {BRAND_GITHUB_URL}
-                    </a>
-                  </p>
+            
                   <button
                     type="button"
                     onClick={() => setIsAboutModalOpen(true)}
-                    className="mt-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-[11px] font-bold text-gray-700 transition hover:bg-gray-50"
+                    className="mt-2.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-bold text-gray-700 transition hover:bg-gray-50"
                   >
                     查看完整说明
                   </button>
@@ -1412,17 +1431,18 @@ function App() {
         }`}
         onClick={() => setIsJsonPasteModalOpen(false)}
       >
-        <div className="mx-auto flex h-full max-w-[820px] items-center justify-center">
+        <div className="mx-auto flex h-full max-w-[600px] items-center justify-center">
           <div
             className={`w-full overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:rounded-[30px] ${
               isJsonPasteModalOpen ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
             }`}
             onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
-                <h2 className="text-lg font-black text-gray-900">直接粘贴 JSON</h2>
-                <p className="text-xs text-gray-500">支持现有工程导出格式，以及 `width/height + points` 坐标格式。</p>
+                <h2 className="text-lg font-black text-gray-900">导入 JSON</h2>
+                <p className="text-xs text-gray-500">上传文件或粘贴文本，支持工程导出格式。</p>
               </div>
               <button
                 type="button"
@@ -1434,15 +1454,43 @@ function App() {
             </div>
 
             <div className="space-y-3 p-4 sm:p-5">
-              <textarea
-                value={jsonImportDraft}
-                onChange={(event) => setJsonImportDraft(event.target.value)}
-                placeholder={`{\n  "width": 50,\n  "height": 50,\n  "points": [\n    { "x": 10, "y": 12, "hex": "#000000" }\n  ]\n}`}
-                className="h-[320px] w-full rounded-2xl border border-[#dccfbf] bg-white px-4 py-3 font-mono text-[12px] leading-6 text-gray-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-              />
+              <div className="flex items-center gap-3">
+                <label className="flex-1 cursor-pointer">
+                  <input
+                    ref={importJsonInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleImportJsonSelected}
+                    className="hidden"
+                  />
+                  <div className="flex h-16 items-center justify-center rounded-2xl border-2 border-dashed border-[#dccfbf] bg-white text-center text-sm font-bold text-gray-600 transition hover:border-teal-300 hover:bg-teal-50">
+                    <div className="flex items-center gap-2">
+                      <svg className="h-5 w-5 text-teal-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                        <polyline points="17,8 12,3 7,8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                      <span>选择 JSON 文件</span>
+                    </div>
+                  </div>
+                </label>
+                <div className="flex items-center gap-1 text-gray-400">
+                  <span className="text-xs font-bold">或</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-gray-700">粘贴 JSON</label>
+                <textarea
+                  value={jsonImportDraft}
+                  onChange={(event) => setJsonImportDraft(event.target.value)}
+                  placeholder={`{\n  "width": 50,\n  "height": 50,\n  "points": [\n    { "x": 10, "y": 12, "hex": "#000000" }\n  ]\n}`}
+                  className="h-[180px] w-full rounded-2xl border border-[#dccfbf] bg-white px-4 py-3 font-mono text-[12px] leading-6 text-gray-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                />
+              </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-[11px] leading-5 text-gray-500">
-                  `color` 可写成 `"#RRGGBB"`，也可写成包含 `hex` 或 `rgb` 字段的对象。
+                  支持 <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">#RRGGBB</code> 或 <code className="rounded bg-gray-100 px-1 font-mono text-[10px]">{"{ hex: '...' }"}</code> 格式
                 </p>
                 <button
                   type="button"
@@ -1450,12 +1498,37 @@ function App() {
                   disabled={!jsonImportDraft.trim()}
                   className={`rounded-full px-4 py-2 text-xs font-bold transition ${
                     jsonImportDraft.trim()
-                      ? 'border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                      ? 'border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
                       : 'cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-300'
                   }`}
                 >
-                  导入 JSON 文本
+                  确认导入
                 </button>
+              </div>
+
+              <div className="rounded-2xl border border-[#eadfd0] bg-[#fbf8f2] p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <svg className="h-4 w-4 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                  <h3 className="text-xs font-black text-gray-800">AI 绘画提示词</h3>
+                </div>
+                <div className="space-y-2 text-[11px] leading-5 text-gray-600">
+                  <p>
+                    使用以下模板让 AI 生成兼容的 JSON 格式：
+                  </p>
+                  <div className="rounded-xl border border-[#dccfbf] bg-white p-2.5 font-mono text-[10px] leading-5 text-gray-700">
+                    <p className="mb-1 text-gray-500">复制提示词给 AI：</p>
+                    <p className="text-slate-600">
+                      "请生成一个拼豆图纸 JSON，包含 <span className="text-sky-700">width</span>（宽度）、<span className="text-sky-700">height</span>（高度）、<span className="text-sky-700">points</span>（颜色点数组，每项含 x、y、hex 坐标和颜色）"
+                    </p>
+                  </div>
+                  <p className="mt-2 text-gray-500">
+                    也可以让 AI 生成图片后，使用上方「导入图片」功能自动转换。
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1470,62 +1543,164 @@ function App() {
       >
         <div className="mx-auto flex h-full max-w-[920px] items-center justify-center">
           <div
-            className={`w-full max-w-3xl overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:rounded-[30px] ${
+            className={`w-full max-w-5xl overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:rounded-[30px] ${
               isAboutModalOpen ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
             }`}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+            <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-lg font-black text-gray-900">关于 {BRAND_NAME}</h2>
-                <p className="text-xs text-gray-500">{BRAND_TAGLINE}</p>
+                <p className="text-xs text-gray-500">完整功能说明与使用指南</p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsAboutModalOpen(false)}
-                className="w-full rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50 sm:w-auto"
+                className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
               >
                 关闭
               </button>
             </div>
 
-            <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-2">
-              <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
-                <h3 className="text-sm font-black text-gray-800">这套工具负责什么</h3>
-                <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
-                  <li>把参考图整理成适合落地制作的拼豆图纸，不必在多个工具之间反复切换。</li>
-                  <li>保留像素、标号、临摹三种视图，方便从排版检查切到实际制作视角。</li>
-                  <li>提供多图层修稿、框选搬移、镜像绘制，适合角色图和对称图案。</li>
-                  <li>一并导出颜色统计、工程文件与图纸预览，减少备料和返工。</li>
-                </ul>
+            <div className="max-h-[65vh] overflow-y-auto p-4 sm:p-5 custom-scrollbar">
+              <div className="mb-4 rounded-2xl border border-[#eadfd0] bg-gradient-to-br from-[#fbf8f2] to-white p-4">
+                <h3 className="text-base font-black text-gray-800">🎨 完整工作流程</h3>
+                <p className="mt-2 text-[13px] leading-6 text-gray-600">
+                  从参考图到可开做的拼豆方案，一站式搞定：<br/>
+                  <span className="font-semibold text-orange-700">导入图片</span> → <span className="font-semibold text-teal-700">智能抠图</span> → <span className="font-semibold text-sky-700">自动配色</span> → <span className="font-semibold text-emerald-700">精细修图</span> → <span className="font-semibold text-amber-700">导出清单</span>
+                </p>
               </div>
 
-              <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
-                <h3 className="text-sm font-black text-gray-800">常用快捷操作</h3>
-                <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
-                  <li>撤销：Ctrl/⌘ + Z，重做：Shift + Ctrl/⌘ + Z</li>
-                  <li>平移：双指滚动 / 右键拖拽 / Space + 拖拽</li>
-                  <li>缩放：使用画布右下角 + / - 控件</li>
-                  <li>取色：Alt + 左键 或 右键单击像素</li>
-                </ul>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">📥 导入与参考图</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-orange-600">导入图片：</span>支持自由裁切、自动去白底、智能抠图</li>
+                    <li><span className="font-semibold text-orange-600">导入 JSON：</span>兼容工程导出格式，支持 AI 生成</li>
+                    <li><span className="font-semibold text-orange-600">主体适配：</span>一键将裁切后的图片适配到画布</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">✂️ 智能抠图工具</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-teal-600">自动识别：</span>快速抠出主体，按颜色与连通区域清理背景</li>
+                    <li><span className="font-semibold text-teal-600">恢复笔刷：</span>在被删掉的区域涂抹，按源图颜色恢复内容</li>
+                    <li><span className="font-semibold text-teal-600">删除笔刷：</span>在背景区域涂抹，自动清理相近颜色</li>
+                    <li><span className="font-semibold text-teal-600">撤销操作：</span>随时回退上一步抠图状态</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">🎨 配色与生成</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-sky-600">自动配色：</span>智能推荐最佳颜色数量，一键应用</li>
+                    <li><span className="font-semibold text-sky-600">手动调节：</span>4-12 色自由调整，即时预览效果</li>
+                    <li><span className="font-semibold text-sky-600">算法模式：</span>主体清理优先、轮廓锁定、黑线稿填色等</li>
+                    <li><span className="font-semibold text-sky-600">工作分辨率：</span>多尺度区域合并，再投影到目标画布</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">🖌️ 画布编辑</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-emerald-600">画笔工具：</span>选择豆子颜色在画布上绘制</li>
+                    <li><span className="font-semibold text-emerald-600">油漆桶：</span>填充连通区域为当前颜色</li>
+                    <li><span className="font-semibold text-emerald-600">取色器：</span>Alt+ 左键或右键单击像素取色</li>
+                    <li><span className="font-semibold text-emerald-600">橡皮擦：</span>清除绘制的豆子</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">⬜ 选择与移动</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-indigo-600">框选工具：</span>框选区域，支持移动和内容搬运</li>
+                    <li><span className="font-semibold text-indigo-600">同色选取：</span>一键选中所有相同颜色的豆子</li>
+                    <li><span className="font-semibold text-indigo-600">移动选区：</span>搬移选中的内容到新位置</li>
+                    <li><span className="font-semibold text-indigo-600">ESC 取消：</span>按 ESC 或点击空白处取消选区</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">📐 形状工具</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-violet-600">直线：</span>绘制两点之间的直线</li>
+                    <li><span className="font-semibold text-violet-600">矩形填充：</span>绘制并填充矩形区域</li>
+                    <li><span className="font-semibold text-violet-600">圆形填充：</span>绘制并填充椭圆形</li>
+                    <li><span className="font-semibold text-violet-600">三角形填充：</span>绘制并填充三角形</li>
+                    <li><span className="font-semibold text-violet-600">文字输入：</span>在画布上输入文字</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">🪞 镜像与视图</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-amber-600">镜像模式：</span>左右 / 上下 / 四向对称绘制</li>
+                    <li><span className="font-semibold text-amber-600">三种视图：</span>像素视图、标号视图、临摹视图</li>
+                    <li><span className="font-semibold text-amber-600">参考底图：</span>导入半透明参考图辅助绘制</li>
+                    <li><span className="font-semibold text-amber-600">图层系统：</span>多图层管理，支持可见性切换</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-[#eadfd0] bg-white p-3">
+                  <h3 className="text-sm font-black text-gray-800">📤 导出与分享</h3>
+                  <ul className="mt-2 space-y-1.5 text-[12px] leading-5 text-gray-600">
+                    <li><span className="font-semibold text-rose-600">颜色统计：</span>自动计算各颜色豆子数量</li>
+                    <li><span className="font-semibold text-rose-600">工程文件：</span>保存完整编辑状态，方便后续修改</li>
+                    <li><span className="font-semibold text-rose-600">图纸预览：</span>导出带标号/纯色的图纸图片</li>
+                    <li><span className="font-semibold text-rose-600">清单整合：</span>减少备料和返工时间</li>
+                  </ul>
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-[#eadfd0] bg-white p-3 md:col-span-2">
+              <div className="mt-4 rounded-2xl border border-[#eadfd0] bg-[#fbf8f2] p-3">
+                <h3 className="text-sm font-black text-gray-800">⌨️ 常用快捷键</h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div className="text-[12px] leading-5 text-gray-600">
+                    <span className="font-semibold">撤销/重做：</span>Ctrl/⌘+Z / Shift+Ctrl/⌘+Z
+                  </div>
+                  <div className="text-[12px] leading-5 text-gray-600">
+                    <span className="font-semibold">平移视图：</span>双指滚动 / 右键拖拽 / Space+ 拖拽
+                  </div>
+                  <div className="text-[12px] leading-5 text-gray-600">
+                    <span className="font-semibold">缩放视图：</span>Ctrl/⌘+ 滚轮 / 双指捏合 / 画布 +/-
+                  </div>
+                  <div className="text-[12px] leading-5 text-gray-600">
+                    <span className="font-semibold">快速取色：</span>Alt+ 左键 或 右键单击
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[#eadfd0] bg-white p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-black text-gray-800">品牌与版本</h3>
+                    <h3 className="text-sm font-black text-gray-800">📦 品牌与版本</h3>
                     <p className="mt-1 text-[12px] text-gray-600">{BRAND_NAME} 由 {BRAND_SHORT_NAME} 命名维护，当前版本 {APP_VERSION}，专注桌面端拼豆图纸制作流程。</p>
-                    <p className="mt-2 text-[12px] text-gray-600">
-                      GitHub：
-                      <a
-                        href={BRAND_GITHUB_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-1 font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
-                      >
-                        lx419394005-cloud/pingdou
-                      </a>
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-[12px]">
+                      <span className="text-gray-600">
+                        GitHub：
+                        <a
+                          href={BRAND_GITHUB_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-1 font-semibold text-teal-700 underline decoration-teal-200 underline-offset-2"
+                        >
+                          lx419394005-cloud/pingdou
+                        </a>
+                      </span>
+                      <span className="text-gray-300">|</span>
+                      <span className="text-gray-600">
+                        小红书：
+                        <a
+                          href={BRAND_XIAOHONGSHU_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-1 font-semibold text-rose-600 underline decoration-rose-200 underline-offset-2"
+                        >
+                          {BRAND_XIAOHONGSHU_LABEL}
+                        </a>
+                      </span>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -1545,13 +1720,6 @@ function App() {
         type="file"
         accept="image/*"
         onChange={handleImportFileSelected}
-        className="hidden"
-      />
-      <input
-        ref={importJsonInputRef}
-        type="file"
-        accept=".json,application/json"
-        onChange={handleImportJsonSelected}
         className="hidden"
       />
     </div>
