@@ -158,6 +158,7 @@ function App() {
     applyAutoTargetColors: () => void;
     applyManualTargetColors: (value: number) => void;
   } | null>(null);
+  const [pickSource, setPickSource] = useState<'current' | 'overlay'>('overlay');
 
   const stats = useMemo(() => {
     const uniqueColors = new Set<string>();
@@ -435,32 +436,49 @@ function App() {
   };
 
   const handleEditorMouseDown = (x: number, y: number) => {
-    if (drawMode !== 'pick' || viewMode !== 'overlay' || !overlayImage || paletteColors.length === 0) {
+    if (drawMode !== 'pick') {
       handleMouseDown(x, y);
       return;
     }
 
-    void (async () => {
-      let sampler = overlaySamplerRef.current;
-      if (!sampler || sampler.src !== overlayImage) {
-        sampler = await loadOverlaySampler(overlayImage);
-        if (!sampler) {
+    const useOverlay = pickSource === 'overlay' && viewMode === 'overlay' && overlayImage;
+    
+    if (useOverlay) {
+      void (async () => {
+        let sampler = overlaySamplerRef.current;
+        if (!sampler || sampler.src !== overlayImage) {
+          sampler = await loadOverlaySampler(overlayImage);
+          if (!sampler) {
+            handleMouseDown(x, y);
+            return;
+          }
+          overlaySamplerRef.current = sampler;
+        }
+
+        const rgb = sampleOverlayColor(sampler, x, y, gridState.config);
+        const nearest = findNearestPaletteColor(rgb, paletteColors, true);
+        if (!nearest) {
           handleMouseDown(x, y);
           return;
         }
-        overlaySamplerRef.current = sampler;
-      }
 
-      const rgb = sampleOverlayColor(sampler, x, y, gridState.config);
-      const nearest = findNearestPaletteColor(rgb, paletteColors);
-      if (!nearest) {
-        handleMouseDown(x, y);
+        setSelectedColor(nearest);
+        setDrawMode('paint');
+      })();
+      return;
+    }
+
+    const cell = composedCells[y]?.[x] ?? null;
+    if (cell && paletteColors.length > 0) {
+      const nearest = findNearestPaletteColor(cell.rgb, paletteColors, false);
+      if (nearest) {
+        setSelectedColor(nearest);
+        setDrawMode('paint');
         return;
       }
-
-      setSelectedColor(nearest);
-      setDrawMode('paint');
-    })();
+    }
+    
+    handleMouseDown(x, y);
   };
 
   const currentRenderLabel = (() => {
@@ -849,7 +867,35 @@ function App() {
                 onClick={() => setSidebarTab('palette')}
                 className="mt-3 w-full rounded-2xl border border-[#efe3cf] bg-[#fbf8f2] p-3 text-left transition hover:border-orange-300"
               >
-                <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">当前颜色</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">当前颜色</div>
+                  {overlayImage && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setPickSource('current')}
+                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold transition ${
+                          pickSource === 'current'
+                            ? 'bg-teal-600 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        当前
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPickSource('overlay')}
+                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold transition ${
+                          pickSource === 'overlay'
+                            ? 'bg-teal-600 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        底图
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div
                   className="mt-2 flex items-center gap-3 rounded-xl border border-white/80 px-3 py-2"
                   style={{ backgroundColor: selectedColor?.hex ?? '#f3ede1' }}

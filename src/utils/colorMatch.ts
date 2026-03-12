@@ -1,4 +1,5 @@
 import type { Color, GridConfig } from '../types';
+import { rgbToLab, deltaE } from './colorUtils';
 
 interface RGB {
   r: number;
@@ -12,7 +13,30 @@ interface OverlaySampler {
   data: Uint8ClampedArray;
 }
 
+interface LabColor {
+  l: number;
+  a: number;
+  b: number;
+}
+
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const rgbToLabSimple = (rgb: RGB): LabColor => {
+  return rgbToLab(rgb.r, rgb.g, rgb.b);
+};
+
+const colorDistanceLab = (c1: RGB, c2: RGB): number => {
+  const lab1 = rgbToLabSimple(c1);
+  const lab2 = rgbToLabSimple(c2);
+  return deltaE(lab1, lab2);
+};
+
+const colorDistanceRGB = (c1: RGB, c2: RGB): number => {
+  const dr = c1.r - c2.r;
+  const dg = c1.g - c2.g;
+  const db = c1.b - c2.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+};
 
 export const mapGridPointToImagePixel = (
   x: number,
@@ -49,18 +73,19 @@ export const sampleOverlayColor = (
   };
 };
 
-export const findNearestPaletteColor = (rgb: RGB, palette: Color[]): Color | null => {
+export const findNearestPaletteColor = (rgb: RGB, palette: Color[], useLab: boolean = true): Color | null => {
   if (palette.length === 0) {
     return null;
   }
 
   let best = palette[0];
-  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestDistance = useLab ? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
+  
   for (const color of palette) {
-    const dr = color.rgb.r - rgb.r;
-    const dg = color.rgb.g - rgb.g;
-    const db = color.rgb.b - rgb.b;
-    const distance = dr * dr + dg * dg + db * db;
+    const distance = useLab 
+      ? colorDistanceLab(rgb, color.rgb)
+      : colorDistanceRGB(rgb, color.rgb);
+    
     if (distance < bestDistance) {
       bestDistance = distance;
       best = color;
