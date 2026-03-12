@@ -317,7 +317,7 @@ function App() {
   ) => {
     loadGridData(cells, { width, height });
     setOverlayImage(nextOverlayImage);
-    setViewMode('overlay');
+    setViewMode('color');
     setIsImportModalOpen(false);
   };
 
