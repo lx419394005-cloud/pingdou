@@ -867,35 +867,7 @@ function App() {
                 onClick={() => setSidebarTab('palette')}
                 className="mt-3 w-full rounded-2xl border border-[#efe3cf] bg-[#fbf8f2] p-3 text-left transition hover:border-orange-300"
               >
-                <div className="flex items-center justify-between">
-                  <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">当前颜色</div>
-                  {overlayImage && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setPickSource('current')}
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold transition ${
-                          pickSource === 'current'
-                            ? 'bg-teal-600 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        当前
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPickSource('overlay')}
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-bold transition ${
-                          pickSource === 'overlay'
-                            ? 'bg-teal-600 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        底图
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">当前颜色</div>
                 <div
                   className="mt-2 flex items-center gap-3 rounded-xl border border-white/80 px-3 py-2"
                   style={{ backgroundColor: selectedColor?.hex ?? '#f3ede1' }}
@@ -1099,9 +1071,49 @@ function App() {
                         );
                       })}
                     </div>
-                  </div>
+                    </div>
 
-                  <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl bg-white p-3">
+                    <div className="mb-3 rounded-2xl bg-white p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">取色源</div>
+                          <div className="mt-0.5 text-xs font-black text-gray-800">选择取色工具的颜色来源</div>
+                        </div>
+                        {overlayImage && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setPickSource('current')}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition ${
+                                pickSource === 'current'
+                                  ? 'bg-teal-600 text-white'
+                                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              当前
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPickSource('overlay')}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition ${
+                                pickSource === 'overlay'
+                                  ? 'bg-teal-600 text-white'
+                                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              底图
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                        {pickSource === 'current'
+                          ? '从画布上已有的像素颜色取色'
+                          : '从参考图（临摹模式）取色，使用 Lab 颜色空间精准匹配'}
+                      </p>
+                    </div>
+
+                    <div className="mb-3 grid grid-cols-2 gap-2 rounded-2xl bg-white p-3">
                     <div>
                       <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">当前工具</div>
                       <div className="mt-1 text-sm font-black text-gray-800">{DRAW_MODE_LABELS[drawMode]}</div>
