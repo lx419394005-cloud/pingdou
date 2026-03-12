@@ -355,7 +355,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
         updateFreePanOffset({ x: freePanOffsetRef.current.x, y: freePanOffsetRef.current.y + dy });
       }
     }
-  }, [externalViewportPan?.requestId, canScrollX, canScrollY, updateFreePanOffset]);
+  }, [externalViewportPan, canScrollX, canScrollY, updateFreePanOffset]);
 
   useEffect(() => {
     if (!externalViewportZoom) {
@@ -404,12 +404,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       nextGutter,
     });
 
-    setManualZoom(nextZoom);
     requestAnimationFrame(() => {
+      setManualZoom(nextZoom);
       viewport.scrollLeft = nextScrollLeft;
       viewport.scrollTop = nextScrollTop;
     });
-  }, [externalViewportZoom?.requestId, canvasHeight, canvasWidth, cellSize, fitZoom, gutter, height, manualZoom, viewMode, width]);
+  }, [externalViewportZoom, canvasHeight, canvasWidth, cellSize, fitZoom, gutter, height, manualZoom, viewMode, width]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -1185,15 +1185,15 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           onPointerMove={handleViewportPointerMove}
           onPointerUp={handleViewportPointerUp}
           onPointerCancel={handleViewportPointerUp}
-          className="h-full min-h-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
+          className="absolute inset-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
           style={{ scrollbarGutter: 'stable both-edges', touchAction: 'none' }}
         >
-          <div className="flex min-h-full min-w-full w-max">
+          <div className="relative h-max w-max">
             <canvas
               ref={canvasRef}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
-              className="block m-auto shrink-0 rounded-2xl border border-[#dbc8b0] bg-white"
+              className="block rounded-2xl border border-[#dbc8b0] bg-white"
               style={{
                 imageRendering: 'pixelated',
                 cursor: canvasCursor,

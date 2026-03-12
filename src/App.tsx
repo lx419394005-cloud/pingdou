@@ -112,6 +112,7 @@ function App() {
     requestId: 0,
     factor: 1,
   });
+  const [isStageDragging, setIsStageDragging] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const importJsonInputRef = useRef<HTMLInputElement>(null);
   const lastNonNoneMirrorModeRef = useRef<MirrorMode>('vertical');
@@ -688,6 +689,7 @@ function App() {
                       lastClientY: event.clientY,
                       moved: false,
                     };
+                    setIsStageDragging(true);
                   }}
                   onPointerMove={(event) => {
                     const drag = stageDragRef.current;
@@ -724,11 +726,13 @@ function App() {
                     (event.currentTarget as HTMLButtonElement).releasePointerCapture(event.pointerId);
                     if (!drag.moved) {
                       stageDragRef.current = null;
+                      setIsStageDragging(false);
                       return;
                     }
                     window.setTimeout(() => {
                       if (stageDragRef.current?.pointerId === event.pointerId) {
                         stageDragRef.current = null;
+                        setIsStageDragging(false);
                       }
                     }, 0);
                   }}
@@ -738,9 +742,10 @@ function App() {
                       return;
                     }
                     stageDragRef.current = null;
+                    setIsStageDragging(false);
                   }}
                   className="block w-full overflow-hidden rounded-[20px] border border-[#dbc8b0] bg-[#faf8f3] text-left transition hover:border-orange-300"
-                  style={{ touchAction: 'none', cursor: stageDragRef.current ? 'grabbing' : 'grab' }}
+                  style={{ touchAction: 'none', cursor: isStageDragging ? 'grabbing' : 'grab' }}
                 >
                   <img
                     src={importPreviewImage}
