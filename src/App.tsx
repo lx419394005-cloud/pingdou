@@ -13,7 +13,7 @@ import { parseGridJsonPayload, parseGridJsonText } from './utils/gridJsonImport'
 import { MAX_TARGET_COLORS, MIN_TARGET_COLORS } from './algorithms/kMeans';
 import { BRAND_DESCRIPTION, BRAND_GITHUB_URL, BRAND_NAME, BRAND_SHORT_NAME, BRAND_TAGLINE } from './config/brand';
 
-const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle']);
+const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle', 'text']);
 const DRAW_MODE_LABELS: Record<DrawMode, string> = {
   paint: '画笔',
   fill: '油漆桶',
@@ -27,6 +27,7 @@ const DRAW_MODE_LABELS: Record<DrawMode, string> = {
   rectangle: '矩形填充',
   ellipse: '圆形填充',
   triangle: '三角形填充',
+  text: '文字输入',
 };
 const MIRROR_MODE_LABELS: Record<MirrorMode, string> = {
   none: '关闭',
@@ -83,6 +84,7 @@ function App() {
     redo,
     canUndo,
     canRedo,
+    setTextInputContent,
   } = useGridState();
 
   const [viewMode, setViewMode] = useState<EditorViewMode>('color');
@@ -103,6 +105,11 @@ function App() {
   const [projectTitleDraft, setProjectTitleDraft] = useState('');
   const [jsonImportDraft, setJsonImportDraft] = useState('');
   const [stageView, setStageView] = useState({ x: 0, y: 0, scale: 1 });
+  const [textInputContent, setTextInputContentValue] = useState('');
+
+  useEffect(() => {
+    setTextInputContent(textInputContent);
+  }, [textInputContent, setTextInputContent]);
   const [editorViewportPan, setEditorViewportPan] = useState<{ requestId: number; dx: number; dy: number }>({
     requestId: 0,
     dx: 0,
@@ -1229,6 +1236,26 @@ function App() {
                       )}
                     </div>
                   </div>
+
+                  {drawMode === 'text' && (
+                    <div className="mb-3 rounded-2xl bg-white p-3">
+                      <div className="mb-1.5">
+                        <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">文字内容</div>
+                        <div className="mt-0.5 text-xs font-black text-gray-800">输入要绘制的文字</div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="输入文字..."
+                        value={textInputContent}
+                        onChange={(e) => setTextInputContentValue(e.target.value)}
+                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 placeholder:text-gray-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      />
+                      <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                        在画布上点击或拖拽来绘制文字
+                      </p>
+                    </div>
+                  )}
+
                   <p className="mt-2 text-[11px] leading-5 text-gray-500">
                     主工具在画布底部；顶栏负责导入与撤销重做，适合连续修稿。
                   </p>

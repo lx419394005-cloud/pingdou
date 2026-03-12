@@ -45,7 +45,8 @@ export type DrawMode =
   | 'line'
   | 'rectangle'
   | 'ellipse'
-  | 'triangle';
+  | 'triangle'
+  | 'text';
 
 export type MirrorMode = 'none' | 'vertical' | 'horizontal' | 'quad';
 

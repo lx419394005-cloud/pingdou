@@ -98,6 +98,7 @@ export const useGridState = () => {
   const activeSelectionRef = useRef<{ start: GridPoint } | null>(null);
   const activeMoveRef = useRef<{ anchor: GridPoint; sources: GridPoint[]; delta: GridPoint } | null>(null);
   const draftChangedRef = useRef(false);
+  const textInputContentRef = useRef<string>('');
   const gridStateRef = useRef<GridState>({
     config: DEFAULT_CONFIG,
     cells: cloneCells(initialActiveLayer.cells),
@@ -352,6 +353,50 @@ export const useGridState = () => {
       setSelectedColor(target);
       setPreviewPoints([]);
       setPreviewColor(null);
+      return;
+    }
+
+    if (drawMode === 'text') {
+      const text = textInputContentRef.current?.trim();
+      if (!text) {
+        return;
+      }
+
+      const textColor = resolveWorkingColor();
+      if (!textColor) {
+        return;
+      }
+
+      replaceGrid((prev) => {
+        const activeLayer = prev.layers.find((layer) => layer.id === prev.activeLayerId) ?? prev.layers[0];
+        if (!activeLayer) {
+          return prev;
+        }
+
+        const newCells = cloneCells(activeLayer.cells);
+        let currentX = x;
+        const config = prev.config;
+
+        for (const char of text) {
+          if (currentX >= config.width) {
+            currentX = x;
+          }
+          if (char !== ' ' && currentX >= 0 && currentX < config.width && y >= 0 && y < config.height) {
+            newCells[y][currentX] = textColor;
+          }
+          currentX += 1;
+        }
+
+        const nextLayers = prev.layers.map((layer) => (
+          layer.id === activeLayer.id
+            ? { ...layer, cells: newCells }
+            : layer
+        ));
+
+        return { ...prev, layers: nextLayers, cells: newCells };
+      });
+
+      pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
       return;
     }
 
@@ -693,5 +738,8 @@ export const useGridState = () => {
     redo,
     canUndo: historyState.index > 0,
     canRedo: historyState.index < historyState.snapshots.length - 1,
+    setTextInputContent: (text: string) => {
+      textInputContentRef.current = text;
+    },
   };
 };

@@ -187,6 +187,19 @@ const TOOL_BUTTONS: Array<{
       </svg>
     ),
   },
+  {
+    mode: 'text',
+    label: '文字输入',
+    group: 'shape',
+    activeClass: 'bg-sky-600 text-white',
+    icon: () => (
+      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 7V4h16v3" />
+        <path d="M12 4v16" />
+        <path d="M8 20h8" />
+      </svg>
+    ),
+  },
 ];
 
 const TOOL_GROUPS: Array<{ id: ToolGroup; label: string }> = [
