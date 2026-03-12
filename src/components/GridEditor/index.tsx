@@ -1372,8 +1372,22 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                 type="button"
                 aria-label="适应窗口"
                 onClick={() => {
+                  const viewport = viewportRef.current;
+                  if (!viewport) {
+                    return;
+                  }
                   updateFreePanOffset({ x: 0, y: 0 });
                   setManualZoom(null);
+                  requestAnimationFrame(() => {
+                    const canvas = canvasRef.current;
+                    if (!canvas) {
+                      return;
+                    }
+                    const targetScrollLeft = (canvas.scrollWidth - viewport.clientWidth) / 2;
+                    const targetScrollTop = (canvas.scrollHeight - viewport.clientHeight) / 2;
+                    viewport.scrollLeft = Math.max(0, targetScrollLeft);
+                    viewport.scrollTop = Math.max(0, targetScrollTop);
+                  });
                 }}
                 className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
               >
