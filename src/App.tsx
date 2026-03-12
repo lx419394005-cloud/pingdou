@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ColorPalette } from './components/ColorPalette';
 import { GridEditor, type EditorViewMode } from './components/GridEditor';
 import { ImageProcessor } from './components/ImageProcessor';
@@ -9,6 +9,8 @@ import type { AlgorithmMode, ColorPalette as ColorPaletteType, Color, DrawMode, 
 import mardPalette from './data/colorCards/mard.json';
 import { getImportImageSizeError, isImportImageSizeValid } from './utils/importImage';
 import { findNearestPaletteColor, sampleOverlayColor } from './utils/colorMatch';
+import { parseGridJsonPayload, parseGridJsonText } from './utils/gridJsonImport';
+import { MAX_TARGET_COLORS, MIN_TARGET_COLORS } from './algorithms/kMeans';
 import { BRAND_DESCRIPTION, BRAND_GITHUB_URL, BRAND_NAME, BRAND_SHORT_NAME, BRAND_TAGLINE } from './config/brand';
 
 const COLOR_DRIVEN_TOOLS = new Set<DrawMode>(['paint', 'fill', 'line', 'rectangle', 'ellipse', 'triangle']);
@@ -33,6 +35,15 @@ const MIRROR_MODE_LABELS: Record<MirrorMode, string> = {
   quad: '四向',
 };
 const APP_VERSION = 'v0.2.0';
+type ImportRenderMode = AlgorithmMode | 'json-import';
+type ImportColorControlState = {
+  hasImage: boolean;
+  targetColorMode: 'auto' | 'manual';
+  recommendedTargetColors: number;
+  selectedTargetColors: number;
+  minTargetColors: number;
+  maxTargetColors: number;
+};
 
 const getColorTextColor = (color: Color | null) => {
   if (!color) {
@@ -79,6 +90,7 @@ function App() {
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const [importPreviewImage, setImportPreviewImage] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isJsonPasteModalOpen, setIsJsonPasteModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isAboutCardCollapsed, setIsAboutCardCollapsed] = useState(true);
@@ -89,7 +101,26 @@ function App() {
   const [customProjectTitle, setCustomProjectTitle] = useState<string | null>(null);
   const [isProjectTitleEditing, setIsProjectTitleEditing] = useState(false);
   const [projectTitleDraft, setProjectTitleDraft] = useState('');
+  const [jsonImportDraft, setJsonImportDraft] = useState('');
+  const [stageView, setStageView] = useState({ x: 0, y: 0, scale: 1 });
+  const [editorViewportPan, setEditorViewportPan] = useState<{ requestId: number; dx: number; dy: number }>({
+    requestId: 0,
+    dx: 0,
+    dy: 0,
+  });
+  const [editorViewportZoom, setEditorViewportZoom] = useState<{ requestId: number; factor: number }>({
+    requestId: 0,
+    factor: 1,
+  });
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  const importJsonInputRef = useRef<HTMLInputElement>(null);
+  const lastNonNoneMirrorModeRef = useRef<MirrorMode>('vertical');
+  const stageDragRef = useRef<{
+    pointerId: number;
+    lastClientX: number;
+    lastClientY: number;
+    moved: boolean;
+  } | null>(null);
   const overlaySamplerRef = useRef<{
     src: string;
     width: number;
@@ -98,7 +129,7 @@ function App() {
   } | null>(null);
   const [importStatus, setImportStatus] = useState<{
     sourceName: string | null;
-    algorithmMode: AlgorithmMode;
+    algorithmMode: ImportRenderMode;
     hasReference: boolean;
     workingResolution: number;
   }>({
@@ -107,6 +138,25 @@ function App() {
     hasReference: false,
     workingResolution: 120,
   });
+
+  useEffect(() => {
+    if (mirrorMode !== 'none') {
+      lastNonNoneMirrorModeRef.current = mirrorMode;
+    }
+  }, [mirrorMode]);
+
+  const [importColorControlState, setImportColorControlState] = useState<ImportColorControlState>({
+    hasImage: false,
+    targetColorMode: 'auto',
+    recommendedTargetColors: 6,
+    selectedTargetColors: 6,
+    minTargetColors: MIN_TARGET_COLORS,
+    maxTargetColors: MAX_TARGET_COLORS,
+  });
+  const importColorActionsRef = useRef<{
+    applyAutoTargetColors: () => void;
+    applyManualTargetColors: (value: number) => void;
+  } | null>(null);
 
   const stats = useMemo(() => {
     const uniqueColors = new Set<string>();
@@ -154,13 +204,14 @@ function App() {
   }, [gridState.palette, setPalette]);
 
   useEffect(() => {
-    if (!isImportModalOpen && !isExportModalOpen && !isAboutModalOpen) {
+    if (!isImportModalOpen && !isJsonPasteModalOpen && !isExportModalOpen && !isAboutModalOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsImportModalOpen(false);
+        setIsJsonPasteModalOpen(false);
         setIsExportModalOpen(false);
         setIsAboutModalOpen(false);
       }
@@ -168,7 +219,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAboutModalOpen, isExportModalOpen, isImportModalOpen]);
+  }, [isAboutModalOpen, isExportModalOpen, isImportModalOpen, isJsonPasteModalOpen]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -217,6 +268,46 @@ function App() {
     }
   };
 
+  const handleImportColorControlsChange = useCallback((controls: {
+    hasImage: boolean;
+    targetColorMode: 'auto' | 'manual';
+    recommendedTargetColors: number;
+    selectedTargetColors: number;
+    minTargetColors: number;
+    maxTargetColors: number;
+    applyAutoTargetColors: () => void;
+    applyManualTargetColors: (value: number) => void;
+  }) => {
+    importColorActionsRef.current = {
+      applyAutoTargetColors: controls.applyAutoTargetColors,
+      applyManualTargetColors: controls.applyManualTargetColors,
+    };
+
+    setImportColorControlState((current) => {
+      const next: ImportColorControlState = {
+        hasImage: controls.hasImage,
+        targetColorMode: controls.targetColorMode,
+        recommendedTargetColors: controls.recommendedTargetColors,
+        selectedTargetColors: controls.selectedTargetColors,
+        minTargetColors: controls.minTargetColors,
+        maxTargetColors: controls.maxTargetColors,
+      };
+
+      if (
+        current.hasImage === next.hasImage
+        && current.targetColorMode === next.targetColorMode
+        && current.recommendedTargetColors === next.recommendedTargetColors
+        && current.selectedTargetColors === next.selectedTargetColors
+        && current.minTargetColors === next.minTargetColors
+        && current.maxTargetColors === next.maxTargetColors
+      ) {
+        return current;
+      }
+
+      return next;
+    });
+  }, []);
+
   const handleGridLoaded = (
     cells: ({ name: string; hex: string; rgb: { r: number; g: number; b: number } } | null)[][],
     width: number,
@@ -231,6 +322,33 @@ function App() {
 
   const requestImportImage = () => {
     importFileInputRef.current?.click();
+  };
+
+  const requestImportJson = () => {
+    importJsonInputRef.current?.click();
+  };
+
+  const openJsonPasteModal = () => {
+    setIsJsonPasteModalOpen(true);
+  };
+
+  const applyImportedGrid = (
+    result: ReturnType<typeof parseGridJsonPayload>,
+    sourceName: string,
+  ) => {
+    setPalette(result.palette);
+    loadGridData(result.cells, result.config);
+    setOverlayImage(null);
+    setImportPreviewImage(null);
+    setViewMode('color');
+    setPendingImportFile(null);
+    setImportStatus({
+      sourceName,
+      algorithmMode: 'json-import',
+      hasReference: true,
+      workingResolution: result.config.width,
+    });
+    setIsImportModalOpen(false);
   };
 
   const handleImportFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -248,6 +366,41 @@ function App() {
     setPendingImportFile(file);
     setIsImportModalOpen(true);
     event.target.value = '';
+  };
+
+  const handleImportJsonSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      try {
+        const result = parseGridJsonText(loadEvent.target?.result as string, gridState.config, gridState.palette);
+        applyImportedGrid(result, file.name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'JSON 导入失败';
+        window.alert(message);
+      }
+    };
+    reader.onerror = () => {
+      window.alert(`读取 JSON 失败：${file.name}`);
+    };
+    reader.readAsText(file, 'utf-8');
+    event.target.value = '';
+  };
+
+  const handleImportJsonText = () => {
+    try {
+      const result = parseGridJsonText(jsonImportDraft, gridState.config, gridState.palette);
+      applyImportedGrid(result, '粘贴 JSON');
+      setJsonImportDraft('');
+      setIsJsonPasteModalOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'JSON 导入失败';
+      window.alert(message);
+    }
   };
 
   const paletteColors = gridState.palette?.colors ?? [];
@@ -309,7 +462,14 @@ function App() {
     })();
   };
 
-  const currentRenderLabel = importStatus.algorithmMode === 'legacy-nearest' ? '最近色直出' : '主体清理优先';
+  const currentRenderLabel = (() => {
+    if (importStatus.algorithmMode === 'legacy-nearest') return '最近色直出';
+    if (importStatus.algorithmMode === 'legacy-guided') return '细节引导';
+    if (importStatus.algorithmMode === 'contour-locked') return '轮廓锁定（多尺度）';
+    if (importStatus.algorithmMode === 'ink-outline-fill') return '黑线稿填色（实验）';
+    if (importStatus.algorithmMode === 'json-import') return 'JSON 坐标导入';
+    return '主体清理优先';
+  })();
   const activeLayer = gridState.layers.find((layer) => layer.id === gridState.activeLayerId) ?? null;
   const visibleLayerCount = gridState.layers.filter((layer) => layer.visible).length;
   const projectTitle = customProjectTitle ?? importStatus.sourceName ?? `${BRAND_SHORT_NAME}的新图纸`;
@@ -414,6 +574,22 @@ function App() {
             </button>
             <button
               type="button"
+              onClick={requestImportJson}
+              className="rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-bold text-teal-700 transition hover:bg-teal-100 sm:px-3"
+            >
+              <span className="sm:hidden">JSON</span>
+              <span className="hidden sm:inline">导入 JSON</span>
+            </button>
+            <button
+              type="button"
+              onClick={openJsonPasteModal}
+              className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-700 transition hover:bg-sky-100 sm:px-3"
+            >
+              <span className="sm:hidden">粘贴</span>
+              <span className="hidden sm:inline">粘贴 JSON</span>
+            </button>
+            <button
+              type="button"
               onClick={undo}
               disabled={!canUndo}
               aria-label="撤销（Command/Ctrl+Z）"
@@ -484,13 +660,96 @@ function App() {
               {importPreviewImage ? (
                 <button
                   type="button"
-                  onClick={() => setIsImportModalOpen(true)}
+                  onClick={() => {
+                    if (stageDragRef.current?.moved) {
+                      stageDragRef.current = null;
+                      return;
+                    }
+                    setIsImportModalOpen(true);
+                  }}
+                  onWheel={(event) => {
+                    // Zoom the stage freely without requiring modifier keys, and sync zoom to the editor canvas.
+                    event.preventDefault();
+                    const factor = event.deltaY < 0 ? 1.08 : 0.92;
+                    setStageView((current) => {
+                      const nextScale = Math.max(0.25, Math.min(4, current.scale * factor));
+                      return { ...current, scale: nextScale };
+                    });
+                    setEditorViewportZoom((current) => ({ requestId: current.requestId + 1, factor }));
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) {
+                      return;
+                    }
+                    (event.currentTarget as HTMLButtonElement).setPointerCapture(event.pointerId);
+                    stageDragRef.current = {
+                      pointerId: event.pointerId,
+                      lastClientX: event.clientX,
+                      lastClientY: event.clientY,
+                      moved: false,
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = stageDragRef.current;
+                    if (!drag || drag.pointerId !== event.pointerId) {
+                      return;
+                    }
+
+                    const dx = event.clientX - drag.lastClientX;
+                    const dy = event.clientY - drag.lastClientY;
+                    drag.lastClientX = event.clientX;
+                    drag.lastClientY = event.clientY;
+                    if (!drag.moved && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
+                      drag.moved = true;
+                    }
+                    if (!dx && !dy) {
+                      return;
+                    }
+
+                    setStageView((current) => {
+                      const limit = 2000;
+                      return {
+                        ...current,
+                        x: Math.max(-limit, Math.min(limit, current.x + dx)),
+                        y: Math.max(-limit, Math.min(limit, current.y + dy)),
+                      };
+                    });
+                    setEditorViewportPan((current) => ({ requestId: current.requestId + 1, dx, dy }));
+                  }}
+                  onPointerUp={(event) => {
+                    const drag = stageDragRef.current;
+                    if (!drag || drag.pointerId !== event.pointerId) {
+                      return;
+                    }
+                    (event.currentTarget as HTMLButtonElement).releasePointerCapture(event.pointerId);
+                    if (!drag.moved) {
+                      stageDragRef.current = null;
+                      return;
+                    }
+                    window.setTimeout(() => {
+                      if (stageDragRef.current?.pointerId === event.pointerId) {
+                        stageDragRef.current = null;
+                      }
+                    }, 0);
+                  }}
+                  onPointerCancel={(event) => {
+                    const drag = stageDragRef.current;
+                    if (!drag || drag.pointerId !== event.pointerId) {
+                      return;
+                    }
+                    stageDragRef.current = null;
+                  }}
                   className="block w-full overflow-hidden rounded-[20px] border border-[#dbc8b0] bg-[#faf8f3] text-left transition hover:border-orange-300"
+                  style={{ touchAction: 'none', cursor: stageDragRef.current ? 'grabbing' : 'grab' }}
                 >
                   <img
                     src={importPreviewImage}
                     alt="参考图预览"
                     className="block h-[180px] w-full object-contain sm:h-[220px]"
+                    style={{
+                      transform: `translate(${stageView.x}px, ${stageView.y}px) scale(${stageView.scale})`,
+                      transformOrigin: 'center',
+                    }}
                   />
                 </button>
               ) : (
@@ -504,24 +763,62 @@ function App() {
               )}
 
               <div className="mt-3 rounded-2xl border border-[#ece2d3] bg-[#fbf8f2] p-3">
-                <div className="mb-2 text-[10px] font-bold tracking-[0.2em] text-gray-400">当前模式</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    ['color', '像素'],
-                    ['number', '标号'],
-                    ['overlay', '临摹'],
-                  ] as Array<[EditorViewMode, string]>).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setViewMode(mode)}
-                      className={`rounded-xl px-2 py-2 text-xs font-bold transition ${
-                        viewMode === mode ? 'bg-teal-600 text-white' : 'border border-gray-200 bg-white text-gray-700'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">视图</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      {
+                        mode: 'color',
+                        label: '像素',
+                        icon: (
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M4 4h6v6H4z" />
+                            <path d="M14 4h6v6h-6z" />
+                            <path d="M4 14h6v6H4z" />
+                            <path d="M14 14h6v6h-6z" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        mode: 'number',
+                        label: '标号',
+                        icon: (
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 4L7 20" />
+                            <path d="M17 4l-2 16" />
+                            <path d="M4 9h18" />
+                            <path d="M3 15h18" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        mode: 'overlay',
+                        label: '临摹',
+                        icon: (
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M6 7a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H8a2 2 0 01-2-2z" />
+                            <path d="M8 3h8a2 2 0 012 2v1" />
+                          </svg>
+                        ),
+                      },
+                    ] as Array<{ mode: EditorViewMode; label: string; icon: ReactNode }>).map(({ mode, label, icon }) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setViewMode(mode)}
+                        aria-label={label}
+                        title={label}
+                        className={`group relative inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${
+                          viewMode === mode ? 'bg-teal-600 text-white' : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {icon}
+                        <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                          {label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 {viewMode === 'overlay' && overlayImage && (
                   <div className="mt-3">
@@ -594,10 +891,22 @@ function App() {
                   selectionPoints={selectionPoints}
                   viewMode={viewMode}
                   overlayImage={overlayImage}
-                overlayOpacity={overlayOpacity}
-                previewPoints={previewPoints}
-                previewColor={previewColor}
-                drawMode={drawMode}
+                  overlayOpacity={overlayOpacity}
+                  previewPoints={previewPoints}
+                  previewColor={previewColor}
+                  drawMode={drawMode}
+                  externalViewportPan={editorViewportPan}
+                  externalViewportZoom={editorViewportZoom}
+                  colorAdjustment={{
+                    enabled: importColorControlState.hasImage,
+                    targetColorMode: importColorControlState.targetColorMode,
+                    recommendedTargetColors: importColorControlState.recommendedTargetColors,
+                    selectedTargetColors: importColorControlState.selectedTargetColors,
+                  minTargetColors: importColorControlState.minTargetColors,
+                  maxTargetColors: importColorControlState.maxTargetColors,
+                  onApplyAuto: () => importColorActionsRef.current?.applyAutoTargetColors(),
+                  onApplyManual: (value) => importColorActionsRef.current?.applyManualTargetColors(value),
+                }}
                 onDrawModeChange={setDrawMode}
                 onCellMouseDown={handleEditorMouseDown}
                 onCellMouseEnter={handleMouseEnter}
@@ -747,89 +1056,96 @@ function App() {
                       <div className="mt-1 text-sm font-black text-gray-800">{DRAW_MODE_LABELS[drawMode]}</div>
                     </div>
                     <div>
-                      <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">镜像模式</div>
-                      <div className="mt-1 text-sm font-black text-gray-800">{MIRROR_MODE_LABELS[mirrorMode]}</div>
-                    </div>
-                  </div>
-                  <div className="mb-3 rounded-2xl bg-white p-3">
-                    <div className="mb-2 text-[10px] font-bold tracking-[0.2em] text-gray-400">镜像方向</div>
-                    <div className="grid grid-cols-4 gap-2">
-                      {([
-                        {
-                          mode: 'none',
-                          label: '关闭',
-                          icon: (
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M5 5l14 14" />
-                              <path d="M19 5L5 19" />
-                            </svg>
-                          ),
-                        },
-                        {
-                          mode: 'vertical',
-                          label: '左右',
-                          icon: (
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 4v16" />
-                              <path d="M4 12h6" />
-                              <path d="M20 12h-6" />
-                              <path d="M4 12l3-3" />
-                              <path d="M4 12l3 3" />
-                              <path d="M20 12l-3-3" />
-                              <path d="M20 12l-3 3" />
-                            </svg>
-                          ),
-                        },
-                        {
-                          mode: 'horizontal',
-                          label: '上下',
-                          icon: (
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M4 12h16" />
-                              <path d="M12 4v6" />
-                              <path d="M12 20v-6" />
-                              <path d="M12 4l-3 3" />
-                              <path d="M12 4l3 3" />
-                              <path d="M12 20l-3-3" />
-                              <path d="M12 20l3-3" />
-                            </svg>
-                          ),
-                        },
-                        {
-                          mode: 'quad',
-                          label: '四向',
-                          icon: (
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 3v18" />
-                              <path d="M3 12h18" />
-                              <path d="M12 3l-2 2" />
-                              <path d="M12 3l2 2" />
-                              <path d="M12 21l-2-2" />
-                              <path d="M12 21l2-2" />
-                              <path d="M3 12l2-2" />
-                              <path d="M3 12l2 2" />
-                              <path d="M21 12l-2-2" />
-                              <path d="M21 12l-2 2" />
-                            </svg>
-                          ),
-                        },
-                      ] as Array<{ mode: MirrorMode; label: string; icon: ReactNode }>).map(({ mode, label, icon }) => (
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">镜像模式</div>
                         <button
-                          key={mode}
                           type="button"
-                          onClick={() => setMirrorMode(mode)}
-                          title={label}
-                          aria-label={label}
-                          className={`group relative inline-flex h-8 items-center justify-center rounded-xl px-2 transition ${
-                            mirrorMode === mode ? 'bg-[#8d5a24] text-white' : 'border border-gray-200 bg-white text-gray-700'
+                          onClick={() => {
+                            setMirrorMode(mirrorMode === 'none' ? lastNonNoneMirrorModeRef.current : 'none');
+                          }}
+                          aria-pressed={mirrorMode !== 'none'}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-black transition ${
+                            mirrorMode === 'none'
+                              ? 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                              : 'border border-[#8d5a24] bg-[#8d5a24] text-white hover:bg-[#7b4f21]'
                           }`}
                         >
-                          {icon}
-                          <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                            {label}
-                          </span>
+                          {mirrorMode === 'none' ? '打开' : '关闭'}
                         </button>
-                      ))}
+                      </div>
+                      <div className="mt-1 text-sm font-black text-gray-800">
+                        {mirrorMode === 'none' ? '关闭' : `开启 · ${MIRROR_MODE_LABELS[mirrorMode]}`}
+                      </div>
+                      {mirrorMode !== 'none' && (
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          {([
+                            {
+                              mode: 'vertical',
+                              label: '左右',
+                              icon: (
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M12 4v16" />
+                                  <path d="M4 12h6" />
+                                  <path d="M20 12h-6" />
+                                  <path d="M4 12l3-3" />
+                                  <path d="M4 12l3 3" />
+                                  <path d="M20 12l-3-3" />
+                                  <path d="M20 12l-3 3" />
+                                </svg>
+                              ),
+                            },
+                            {
+                              mode: 'horizontal',
+                              label: '上下',
+                              icon: (
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M4 12h16" />
+                                  <path d="M12 4v6" />
+                                  <path d="M12 20v-6" />
+                                  <path d="M12 4l-3 3" />
+                                  <path d="M12 4l3 3" />
+                                  <path d="M12 20l-3-3" />
+                                  <path d="M12 20l3-3" />
+                                </svg>
+                              ),
+                            },
+                            {
+                              mode: 'quad',
+                              label: '四向',
+                              icon: (
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M12 3v18" />
+                                  <path d="M3 12h18" />
+                                  <path d="M12 3l-2 2" />
+                                  <path d="M12 3l2 2" />
+                                  <path d="M12 21l-2-2" />
+                                  <path d="M12 21l2-2" />
+                                  <path d="M3 12l2-2" />
+                                  <path d="M3 12l2 2" />
+                                  <path d="M21 12l-2-2" />
+                                  <path d="M21 12l-2 2" />
+                                </svg>
+                              ),
+                            },
+                          ] as Array<{ mode: Exclude<MirrorMode, 'none'>; label: string; icon: ReactNode }>).map(({ mode, label, icon }) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setMirrorMode(mode)}
+                              title={label}
+                              aria-label={label}
+                              className={`group relative inline-flex h-7 items-center justify-center rounded-xl px-2 transition ${
+                                mirrorMode === mode ? 'bg-[#8d5a24] text-white' : 'border border-gray-200 bg-white text-gray-700'
+                              }`}
+                            >
+                              {icon}
+                              <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                                {label}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <p className="mt-2 text-[11px] leading-5 text-gray-500">
@@ -946,24 +1262,19 @@ function App() {
               <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <div>
                   <h2 className="text-lg font-black text-gray-900">导入图片，生成 {BRAND_SHORT_NAME} 的图纸稿</h2>
-                  <p className="text-xs text-gray-500">在这里完成裁切、缩放、去白底与颜色设置，再送进主编辑区微调</p>
+                  <p className="text-xs text-gray-500">在这里完成裁切、缩放和去底，再送进主编辑区调颜色与微调</p>
                 </div>
-                <div className="flex w-full items-center gap-2 sm:w-auto">
-                  <button
-                    type="button"
-                    onClick={requestImportImage}
-                    className="flex-1 rounded-full border border-orange-200 bg-orange-50 px-3.5 py-1.5 text-xs font-bold text-orange-700 transition hover:bg-orange-100 sm:flex-none"
-                  >
-                    更换图片
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsImportModalOpen(false)}
-                    className="flex-1 rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50 sm:flex-none"
-                  >
-                    关闭
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50 sm:w-auto"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6L6 18" />
+                  </svg>
+                  关闭
+                </button>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-4 custom-scrollbar">
@@ -974,15 +1285,73 @@ function App() {
                   variant="modal"
                   initialImageFile={pendingImportFile}
                   onRequestImageFile={requestImportImage}
+                  enableExperimentalModes
                   defaultAlgorithmMode="legacy-clean"
                   onProcessed={() => setIsImportModalOpen(false)}
                   onPreviewChange={setImportPreviewImage}
+                  onColorControlsChange={handleImportColorControlsChange}
                   onStatusChange={setImportStatus}
                 />
               </div>
             </div>
+        </div>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 p-3 transition md:p-5 ${
+          isJsonPasteModalOpen ? 'pointer-events-auto bg-[#2b241d]/42 backdrop-blur-[2px]' : 'pointer-events-none bg-transparent'
+        }`}
+        onClick={() => setIsJsonPasteModalOpen(false)}
+      >
+        <div className="mx-auto flex h-full max-w-[820px] items-center justify-center">
+          <div
+            className={`w-full overflow-hidden rounded-[24px] border border-[#eadfd0] bg-[#fffaf2] transition md:rounded-[30px] ${
+              isJsonPasteModalOpen ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
+            }`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-col gap-3 border-b border-[#efe3d2] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div>
+                <h2 className="text-lg font-black text-gray-900">直接粘贴 JSON</h2>
+                <p className="text-xs text-gray-500">支持现有工程导出格式，以及 `width/height + points` 坐标格式。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsJsonPasteModalOpen(false)}
+                className="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="space-y-3 p-4 sm:p-5">
+              <textarea
+                value={jsonImportDraft}
+                onChange={(event) => setJsonImportDraft(event.target.value)}
+                placeholder={`{\n  "width": 50,\n  "height": 50,\n  "points": [\n    { "x": 10, "y": 12, "hex": "#000000" }\n  ]\n}`}
+                className="h-[320px] w-full rounded-2xl border border-[#dccfbf] bg-white px-4 py-3 font-mono text-[12px] leading-6 text-gray-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-[11px] leading-5 text-gray-500">
+                  `color` 可写成 `"#RRGGBB"`，也可写成包含 `hex` 或 `rgb` 字段的对象。
+                </p>
+                <button
+                  type="button"
+                  onClick={handleImportJsonText}
+                  disabled={!jsonImportDraft.trim()}
+                  className={`rounded-full px-4 py-2 text-xs font-bold transition ${
+                    jsonImportDraft.trim()
+                      ? 'border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                      : 'cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-300'
+                  }`}
+                >
+                  导入 JSON 文本
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+      </div>
 
       <div
         className={`fixed inset-0 z-50 p-3 transition md:p-5 ${
@@ -1067,6 +1436,13 @@ function App() {
         type="file"
         accept="image/*"
         onChange={handleImportFileSelected}
+        className="hidden"
+      />
+      <input
+        ref={importJsonInputRef}
+        type="file"
+        accept=".json,application/json"
+        onChange={handleImportJsonSelected}
         className="hidden"
       />
     </div>

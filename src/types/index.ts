@@ -55,11 +55,12 @@ export interface ProcessedImage {
   originalHeight: number;
 }
 
-export type AlgorithmMode = 'legacy-clean' | 'contour-locked' | 'legacy-guided' | 'legacy-nearest';
+export type AlgorithmMode = 'legacy-clean' | 'contour-locked' | 'legacy-guided' | 'legacy-nearest' | 'ink-outline-fill';
 
 export interface ProcessImageOptions {
   mode?: AlgorithmMode;
   contourImageData?: ImageData;
   targetColors?: number;
   workingResolution?: number;
+  contourThreshold?: number;
 }

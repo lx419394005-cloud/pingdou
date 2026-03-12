@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applySeededCutout,
+  applySeededRestore,
   computeCropSourceRect,
+  cropImageData,
   findOpaqueBounds,
   sliderValueToZoomScale,
   applyPolygonCutout,
@@ -174,6 +177,113 @@ describe('imageProcessing', () => {
     const removed = applyPolygonCutout(imageData, polygon, 'remove');
     expect(removed.data[3]).toBe(255);
     expect(removed.data[((2 * 5 + 2) * 4) + 3]).toBe(0);
+  });
+
+  it('expands smart brush cutout from connected seed pixels only', () => {
+    const imageData = createImageData(7, 4, (x) => {
+      if (x <= 2) {
+        return { r: 210, g: 80, b: 70 };
+      }
+      if (x >= 4) {
+        return { r: 214, g: 84, b: 76 };
+      }
+      return { r: 20, g: 20, b: 20 };
+    });
+
+    const kept = applySeededCutout(imageData, [{ x: 1, y: 1 }], 'keep', { tolerance: 16, radius: 0 });
+    expect(kept.data[((1 * 7 + 1) * 4) + 3]).toBe(255);
+    expect(kept.data[((1 * 7 + 5) * 4) + 3]).toBe(0);
+    expect(kept.data[((1 * 7 + 3) * 4) + 3]).toBe(0);
+
+    const removed = applySeededCutout(imageData, [{ x: 1, y: 1 }], 'remove', { tolerance: 16, radius: 0 });
+    expect(removed.data[((1 * 7 + 1) * 4) + 3]).toBe(0);
+    expect(removed.data[((1 * 7 + 5) * 4) + 3]).toBe(255);
+  });
+
+  it('uses brush radius to collect nearby seed pixels before smart expansion', () => {
+    const imageData = createImageData(6, 6, (x, y) => {
+      if (x >= 1 && x <= 4 && y >= 1 && y <= 4) {
+        return { r: 60, g: 180, b: 120 };
+      }
+      return { r: 240, g: 240, b: 240 };
+    });
+
+    const kept = applySeededCutout(imageData, [{ x: 2, y: 2 }], 'keep', { tolerance: 24, radius: 2 });
+    expect(kept.data[((2 * 6 + 2) * 4) + 3]).toBe(255);
+    expect(kept.data[((5 * 6 + 5) * 4) + 3]).toBe(0);
+  });
+
+  it('keeps magic-wand selection locked to the initial sampled color instead of unioning every brushed color', () => {
+    const imageData = createImageData(8, 4, (x) => {
+      if (x <= 2) {
+        return { r: 210, g: 80, b: 70 };
+      }
+      if (x >= 5) {
+        return { r: 70, g: 130, b: 220 };
+      }
+      return { r: 240, g: 240, b: 240 };
+    });
+
+    const kept = applySeededCutout(
+      imageData,
+      [
+        { x: 1, y: 1 },
+        { x: 6, y: 1 },
+      ],
+      'keep',
+      { tolerance: 18, radius: 0 },
+    );
+
+    expect(kept.data[((1 * 8 + 1) * 4) + 3]).toBe(255);
+    expect(kept.data[((1 * 8 + 6) * 4) + 3]).toBe(0);
+    expect(kept.data[((1 * 8 + 3) * 4) + 3]).toBe(0);
+  });
+
+  it('restores deleted pixels from the cropped source image using color-connected selection', () => {
+    const source = createImageData(7, 4, (x) => {
+      if (x <= 2) {
+        return { r: 210, g: 80, b: 70 };
+      }
+      if (x >= 4) {
+        return { r: 70, g: 130, b: 220 };
+      }
+      return { r: 240, g: 240, b: 240 };
+    });
+    const current = applySeededCutout(source, [{ x: 1, y: 1 }], 'remove', { tolerance: 18, radius: 0 });
+
+    const restored = applySeededRestore(
+      current,
+      source,
+      [
+        { x: 1, y: 1 },
+        { x: 5, y: 1 },
+      ],
+      { tolerance: 18, radius: 0 },
+    );
+
+    expect(restored.data[((1 * 7 + 1) * 4) + 3]).toBe(255);
+    expect(restored.data[((1 * 7 + 1) * 4)]).toBe(210);
+    expect(restored.data[((1 * 7 + 5) * 4) + 3]).toBe(255);
+    expect(restored.data[((1 * 7 + 3) * 4) + 3]).toBe(255);
+  });
+
+  it('crops image data using a free crop rectangle', () => {
+    const imageData = createImageData(5, 4, (x, y) => ({
+      r: x * 20,
+      g: y * 30,
+      b: 100,
+    }));
+
+    const cropped = cropImageData(imageData, {
+      x: 1,
+      y: 1,
+      width: 3,
+      height: 2,
+    });
+
+    expect(cropped.width).toBe(3);
+    expect(cropped.height).toBe(2);
+    expect(Array.from(cropped.data.slice(0, 8))).toEqual([20, 30, 100, 255, 40, 30, 100, 255]);
   });
 
   it('computes clipped crop source rect from preview transform', () => {

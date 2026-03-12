@@ -205,6 +205,18 @@ interface GridEditorProps {
   previewPoints: Array<{ x: number; y: number }>;
   previewColor: Color | null;
   drawMode: DrawMode;
+  externalViewportPan?: { requestId: number; dx: number; dy: number };
+  externalViewportZoom?: { requestId: number; factor: number };
+  colorAdjustment?: {
+    enabled: boolean;
+    targetColorMode: 'auto' | 'manual';
+    recommendedTargetColors: number;
+    selectedTargetColors: number;
+    minTargetColors: number;
+    maxTargetColors: number;
+    onApplyAuto: () => void;
+    onApplyManual: (value: number) => void;
+  };
   onDrawModeChange: (mode: DrawMode) => void;
   onCellMouseDown: (x: number, y: number) => void;
   onCellMouseEnter: (x: number, y: number) => void;
@@ -229,6 +241,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   previewPoints,
   previewColor,
   drawMode,
+  externalViewportPan,
+  externalViewportZoom,
+  colorAdjustment,
   onDrawModeChange,
   onCellMouseDown,
   onCellMouseEnter,
@@ -257,6 +272,9 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [freePanOffset, setFreePanOffset] = useState({ x: 0, y: 0 });
+  const [isColorPopoverOpen, setIsColorPopoverOpen] = useState(false);
+  const colorPopoverRef = useRef<HTMLDivElement>(null);
+  const isColorPopoverVisible = isColorPopoverOpen && Boolean(colorAdjustment?.enabled);
 
   const colorLabelMap = useMemo(() => buildColorLabelMap(gridState.cells), [gridState.cells]);
   const previewKeySet = useMemo(
@@ -309,6 +327,91 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   }, [freePanLimitX, freePanLimitY]);
 
   useEffect(() => {
+    if (!externalViewportPan) {
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const { dx, dy } = externalViewportPan;
+    const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+
+    if (dx) {
+      if (canScrollX) {
+        viewport.scrollLeft = Math.max(0, Math.min(maxScrollLeft, viewport.scrollLeft - dx));
+      } else {
+        updateFreePanOffset({ x: freePanOffsetRef.current.x + dx, y: freePanOffsetRef.current.y });
+      }
+    }
+
+    if (dy) {
+      if (canScrollY) {
+        viewport.scrollTop = Math.max(0, Math.min(maxScrollTop, viewport.scrollTop - dy));
+      } else {
+        updateFreePanOffset({ x: freePanOffsetRef.current.x, y: freePanOffsetRef.current.y + dy });
+      }
+    }
+  }, [externalViewportPan?.requestId, canScrollX, canScrollY, updateFreePanOffset]);
+
+  useEffect(() => {
+    if (!externalViewportZoom) {
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const previousZoom = manualZoom ?? fitZoom;
+    const factor = externalViewportZoom.factor;
+    const nextZoom = clampZoom(previousZoom * factor);
+    if (Math.abs(nextZoom - previousZoom) < 0.001) {
+      return;
+    }
+
+    // Anchor zoom at viewport center (mirrors the wheel-zoom behavior without an event cursor).
+    const cursorOffsetX = viewport.clientWidth / 2;
+    const cursorOffsetY = viewport.clientHeight / 2;
+    const nextCellSize = Math.max(4, Math.floor(BASE_CELL_SIZE * nextZoom));
+    const nextGutter = viewMode === 'color' ? 0 : Math.max(24, Math.floor(nextCellSize * 1.5));
+    const nextCanvasWidth = nextGutter + (width * nextCellSize) + 1;
+    const nextCanvasHeight = nextGutter + (height * nextCellSize) + 1;
+    const nextScrollLeft = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientWidth,
+      cursorOffset: cursorOffsetX,
+      scrollOffset: viewport.scrollLeft,
+      previousCanvasSize: canvasWidth,
+      nextCanvasSize: nextCanvasWidth,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
+    const nextScrollTop = computeAnchoredScrollOffset({
+      viewportSize: viewport.clientHeight,
+      cursorOffset: cursorOffsetY,
+      scrollOffset: viewport.scrollTop,
+      previousCanvasSize: canvasHeight,
+      nextCanvasSize: nextCanvasHeight,
+      previousCellSize: cellSize,
+      nextCellSize,
+      previousGutter: gutter,
+      nextGutter,
+    });
+
+    setManualZoom(nextZoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = nextScrollLeft;
+      viewport.scrollTop = nextScrollTop;
+    });
+  }, [externalViewportZoom?.requestId, canvasHeight, canvasWidth, cellSize, fitZoom, gutter, height, manualZoom, viewMode, width]);
+
+  useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
@@ -336,8 +439,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       y: canScrollY ? 0 : freePanOffsetRef.current.y,
     };
     if (next.x !== freePanOffsetRef.current.x || next.y !== freePanOffsetRef.current.y) {
-      updateFreePanOffset(next);
+      const frame = window.requestAnimationFrame(() => {
+        updateFreePanOffset(next);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
+    return undefined;
   }, [canScrollX, canScrollY, updateFreePanOffset]);
 
   useEffect(() => {
@@ -584,7 +691,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     drawHoveredLayer();
     drawPreview();
     drawSelection();
-  }, [cellSize, colorLabelMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, selectionKeySet, strokeWidth, viewMode, width, height, zoom]);
+  }, [canvasHeight, canvasWidth, cellSize, colorLabelMap, gridState.cells, gridState.config, gutter, hoverPreviewMap, overlayImage, overlayOpacity, previewColor, previewKeySet, selectionKeySet, strokeWidth, viewMode, width, height, zoom]);
 
   const getGridPosition = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -1024,6 +1131,31 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     };
   }, [applyPanFromPointer, isPanning, stopPanning]);
 
+  useEffect(() => {
+    if (!isColorPopoverOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!colorPopoverRef.current?.contains(event.target as Node)) {
+        setIsColorPopoverOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsColorPopoverOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isColorPopoverOpen]);
+
   const canvasCursor = isPanning
     ? 'grabbing'
     : (
@@ -1152,20 +1284,105 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               <kbd className="mx-1 rounded border border-gray-300 bg-white px-1 py-0.5 font-semibold text-gray-600">Space + 拖拽</kbd>
               平移
             </div>
-            <button
-              type="button"
-              aria-label="适应窗口"
-              onClick={() => {
-                updateFreePanOffset({ x: 0, y: 0 });
-                setManualZoom(null);
-              }}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
-            >
-              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[9px] leading-none text-[#dd6b20]">
-                ⤢
-              </span>
-              <span>重置视图</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {colorAdjustment && (
+                <div ref={colorPopoverRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    aria-label="打开颜色调节"
+                    title="颜色调节"
+                    disabled={!colorAdjustment.enabled}
+                    onClick={() => setIsColorPopoverOpen((current) => !current)}
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black shadow-sm transition ${
+                      colorAdjustment.enabled
+                        ? 'border-[#d8c6aa] bg-white text-[#8a5a24] hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow'
+                        : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-300'
+                    }`}
+                  >
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[#dd6b20]">
+                      <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="7" />
+                        <path d="M12 5v14" />
+                        <path d="M12 12h7" />
+                      </svg>
+                    </span>
+                    <span>{colorAdjustment.targetColorMode === 'auto' ? `自动 ${colorAdjustment.recommendedTargetColors}` : `${colorAdjustment.selectedTargetColors} 色`}</span>
+                  </button>
+
+                  <div
+                    className={`absolute bottom-full right-0 z-50 mb-2 w-[248px] rounded-2xl border border-[#e4d4be] bg-white/98 p-3 shadow-[0_20px_60px_rgba(83,52,24,0.18)] backdrop-blur transition ${
+                      isColorPopoverVisible ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-bold tracking-[0.18em] text-gray-400">颜色调节</div>
+                        <div className="mt-1 text-xs font-black text-gray-800">全局重新试色数</div>
+                      </div>
+                      <div className="rounded-full bg-[#f6efe4] px-2 py-1 text-[10px] font-black text-[#8a5a24]">
+                        4 - 12 色
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={!colorAdjustment.enabled}
+                        onClick={colorAdjustment.onApplyAuto}
+                        className={`rounded-xl px-3 py-2 text-xs font-bold transition ${
+                          colorAdjustment.targetColorMode === 'auto'
+                            ? 'bg-orange-500 text-white'
+                            : 'border border-gray-200 bg-white text-gray-700'
+                        } ${!colorAdjustment.enabled ? 'cursor-not-allowed opacity-45' : ''}`}
+                      >
+                        自动
+                      </button>
+                      <div className="flex items-center justify-center rounded-xl border border-dashed border-[#e6d8c6] bg-[#faf8f3] px-3 py-2 text-[11px] font-bold text-gray-600">
+                        推荐 {colorAdjustment.recommendedTargetColors} 色
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="mb-1 flex items-center justify-between text-[11px] font-bold text-gray-500">
+                        <span>手动颜色数</span>
+                        <span className="text-orange-700">{colorAdjustment.selectedTargetColors}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={colorAdjustment.minTargetColors}
+                        max={colorAdjustment.maxTargetColors}
+                        step="1"
+                        disabled={!colorAdjustment.enabled}
+                        value={colorAdjustment.selectedTargetColors}
+                        onChange={(event) => colorAdjustment.onApplyManual(Number.parseInt(event.target.value, 10))}
+                        className="w-full accent-orange-500"
+                      />
+                    </div>
+
+                    <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                      {colorAdjustment.enabled
+                        ? '拖动后会立刻重新生成当前图纸，方便直接对比不同颜色数效果。'
+                        : '先导入参考图并生成一次图纸，这里才会接管颜色调节。'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                aria-label="适应窗口"
+                onClick={() => {
+                  updateFreePanOffset({ x: 0, y: 0 });
+                  setManualZoom(null);
+                }}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d8c6aa] bg-white px-2.5 py-1 text-[10px] font-black text-[#8a5a24] shadow-sm transition hover:-translate-y-0.5 hover:border-[#dd6b20] hover:text-[#dd6b20] hover:shadow"
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#fff3e6] text-[9px] leading-none text-[#dd6b20]">
+                  ⤢
+                </span>
+                <span>重置视图</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

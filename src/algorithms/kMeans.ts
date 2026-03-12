@@ -57,8 +57,8 @@ const GUIDED_EDGE_PALETTE_SIZE = 3;
 const GUIDED_LOCKED_CONTOUR_MAX_COLORS = 2;
 const CLEAN_TARGET_COLORS = 6;
 const CLEAN_PROTECTED_COLOR_SLOTS = 2;
-const MIN_TARGET_COLORS = 4;
-const MAX_TARGET_COLORS = 12;
+export const MIN_TARGET_COLORS = 4;
+export const MAX_TARGET_COLORS = 12;
 
 const clampTargetColors = (value: number): number =>
   Math.max(MIN_TARGET_COLORS, Math.min(MAX_TARGET_COLORS, Math.round(value)));
@@ -1203,6 +1203,188 @@ const compressGridToPalette = (
   }
 };
 
+const isNearBlackInk = (r: number, g: number, b: number, threshold: number): boolean => {
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  const normalized = Math.max(0, Math.min(100, threshold));
+  const brightnessLimit = 52 + (normalized * 0.9);
+  const chromaLimit = 18 + (normalized * 0.72);
+  return brightness <= brightnessLimit && chroma <= chromaLimit;
+};
+
+const extractInkOutlineMask = (
+  contourImageData: ImageData,
+  targetWidth: number,
+  targetHeight: number,
+  threshold: number,
+): Uint8Array => {
+  const sourceWidth = contourImageData.width;
+  const sourceHeight = contourImageData.height;
+  const { data } = contourImageData;
+  const sourceMask = new Uint8Array(sourceWidth * sourceHeight);
+
+  for (let i = 0; i < sourceMask.length; i++) {
+    const p = i * 4;
+    if (data[p + 3] < 128) continue;
+    if (isNearBlackInk(data[p], data[p + 1], data[p + 2], threshold)) {
+      sourceMask[i] = 1;
+    }
+  }
+
+  // Strip isolated dark noise from the high-res contour source before downsampling.
+  for (let y = 1; y < sourceHeight - 1; y++) {
+    for (let x = 1; x < sourceWidth - 1; x++) {
+      const idx = y * sourceWidth + x;
+      if (!sourceMask[idx]) continue;
+      let neighbors = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          neighbors += sourceMask[(y + dy) * sourceWidth + (x + dx)];
+        }
+      }
+      if (neighbors === 0) {
+        sourceMask[idx] = 0;
+      }
+    }
+  }
+
+  const downsampled = new Uint8Array(targetWidth * targetHeight);
+  const normalized = Math.max(0, Math.min(100, threshold));
+  const hitRatio = 0.14 - (normalized * 0.001);
+  const minHitRatio = Math.max(0.04, Math.min(0.16, hitRatio));
+  for (let ty = 0; ty < targetHeight; ty++) {
+    const y0 = Math.floor((ty * sourceHeight) / targetHeight);
+    const y1 = Math.max(y0 + 1, Math.floor(((ty + 1) * sourceHeight) / targetHeight));
+    for (let tx = 0; tx < targetWidth; tx++) {
+      const x0 = Math.floor((tx * sourceWidth) / targetWidth);
+      const x1 = Math.max(x0 + 1, Math.floor(((tx + 1) * sourceWidth) / targetWidth));
+      const blockArea = Math.max(1, (x1 - x0) * (y1 - y0));
+      const hitThreshold = Math.max(1, Math.ceil(blockArea * minHitRatio));
+      let hits = 0;
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0; sx < x1; sx++) {
+          hits += sourceMask[sy * sourceWidth + sx];
+        }
+      }
+      if (hits >= hitThreshold) {
+        downsampled[ty * targetWidth + tx] = 1;
+      }
+    }
+  }
+
+  const repaired = repairContourMask(downsampled, targetWidth, targetHeight);
+  return thinContourMask(repaired, new Uint8Array(repaired.length), targetWidth, targetHeight);
+};
+
+const pickInkOutlineColor = (palette: Color[]): Color => {
+  const ranked = palette
+    .map((color) => {
+      const brightness = (color.rgb.r * 299 + color.rgb.g * 587 + color.rgb.b * 114) / 1000;
+      const chroma = Math.max(color.rgb.r, color.rgb.g, color.rgb.b) - Math.min(color.rgb.r, color.rgb.g, color.rgb.b);
+      return { color, brightness, chroma };
+    })
+    .sort((a, b) => {
+      if (a.brightness !== b.brightness) return a.brightness - b.brightness;
+      return a.chroma - b.chroma;
+    });
+
+  const strict = ranked.find((entry) => entry.brightness <= 70 && entry.chroma <= 40);
+  return strict?.color ?? ranked[0].color;
+};
+
+const runInkOutlineFill = (
+  imageData: ImageData,
+  width: number,
+  height: number,
+  palette: Color[],
+  options?: ProcessImageOptions,
+): GridCell[][] => {
+  const source = options?.contourImageData ?? imageData;
+  const targetColors = clampTargetColors(options?.targetColors ?? GUIDED_TOTAL_MAX_COLORS);
+  const contourThreshold = Math.max(0, Math.min(100, options?.contourThreshold ?? 50));
+  const outlineMask = extractInkOutlineMask(source, width, height, contourThreshold);
+  const outlineColor = pickInkOutlineColor(palette);
+  const fillPalette = palette.filter((color) => color.hex !== outlineColor.hex);
+  const effectiveFillPalette = fillPalette.length > 0 ? fillPalette : palette;
+  const grid = makeGrid(width, height);
+  const interiorMask = new Uint8Array(width * height);
+  const visited = new Uint8Array(width * height);
+  const { data } = imageData;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const p = idx * 4;
+      if (data[p + 3] < 128) {
+        grid[y][x] = null;
+        continue;
+      }
+      if (outlineMask[idx]) {
+        grid[y][x] = outlineColor;
+        continue;
+      }
+      interiorMask[idx] = 1;
+    }
+  }
+
+  const directions = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+  ] as const;
+
+  for (let idx = 0; idx < interiorMask.length; idx++) {
+    if (!interiorMask[idx] || visited[idx]) continue;
+    visited[idx] = 1;
+    const queue = [idx];
+    const pixels: number[] = [];
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+
+    while (queue.length > 0) {
+      const current = queue.pop() as number;
+      pixels.push(current);
+      const p = current * 4;
+      sumR += data[p];
+      sumG += data[p + 1];
+      sumB += data[p + 2];
+
+      const x = current % width;
+      const y = Math.floor(current / width);
+      for (const [dx, dy] of directions) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const neighbor = (ny * width) + nx;
+        if (!interiorMask[neighbor] || visited[neighbor]) continue;
+        visited[neighbor] = 1;
+        queue.push(neighbor);
+      }
+    }
+
+    if (pixels.length === 0) continue;
+    const average = {
+      r: sumR / pixels.length,
+      g: sumG / pixels.length,
+      b: sumB / pixels.length,
+    };
+    const fillColor = findNearestColor(average, effectiveFillPalette);
+    for (const pixel of pixels) {
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      grid[y][x] = fillColor;
+    }
+  }
+
+  let outlineCount = 0;
+  for (const value of outlineMask) outlineCount += value;
+  const fillTargetColors = outlineCount > 0
+    ? Math.max(1, targetColors - 1)
+    : targetColors;
+  compressMaskedColors(grid, interiorMask, fillTargetColors, false);
+  return grid;
+};
+
 const initializeWeightedCenters = (samples: WeightedSample[], k: number, random: () => number): LabColor[] => {
   const centers: LabColor[] = [];
   centers.push(samples[Math.floor(random() * samples.length)].lab);
@@ -1649,6 +1831,9 @@ export const processImageToGrid = (
   }
   if (mode === 'contour-locked') {
     return runMultiscalePatternPipeline(imageData, width, height, palette, options);
+  }
+  if (mode === 'ink-outline-fill') {
+    return runInkOutlineFill(imageData, width, height, palette, options);
   }
   return runLegacyGuided(imageData, width, height, palette, options);
 };

@@ -130,14 +130,14 @@ export const useGridState = () => {
     const normalized = dedupePoints(points);
     selectionPointsRef.current = normalized;
     setSelectionPointsState(normalized);
-  }, []);
+  }, [setSelectionPointsState]);
 
   const replaceGrid = useCallback((updater: (prev: GridState) => GridState) => {
     const next = updater(gridStateRef.current);
     gridStateRef.current = next;
     setGridState(next);
     return next;
-  }, []);
+  }, [setGridState]);
 
   const undo = useCallback(() => {
     const result = getUndoHistoryState(historyStateRef.current);
@@ -240,7 +240,7 @@ export const useGridState = () => {
     if (didChange) {
       pushHistory(gridStateRef.current.layers, gridStateRef.current.activeLayerId);
     }
-  }, [drawMode, pushHistory, replaceGrid]);
+  }, [drawMode, pushHistory, replaceGrid, setSelectedColor]);
 
   const applyPoints = useCallback((points: GridPoint[], color: GridCell) => {
     let didChange = false;
@@ -432,6 +432,7 @@ export const useGridState = () => {
     setIsDrawing,
     setPreviewColor,
     setPreviewPoints,
+    setSelectionPoints,
     setSelectedColor,
   ]);
 

@@ -1071,4 +1071,120 @@ describe('processImageToGrid', () => {
     expect(skinPixels).toBeGreaterThanOrEqual(180);
     expect(shirtPixels).toBeGreaterThanOrEqual(180);
   });
+
+  it('ink-outline-fill should lock only near-black contour lines and ignore brown inner details', () => {
+    const width = 50;
+    const height = 50;
+    const contourWidth = 200;
+    const contourHeight = 200;
+
+    const baseImage = createImageData(width, height, (x, y) => {
+      const dx = x - 24;
+      const dy = y - 25;
+      const inside = ((dx * dx) / (14 * 14)) + ((dy * dy) / (17 * 17)) <= 1;
+      if (inside) {
+        return { r: 232, g: 191, b: 156 };
+      }
+      return { r: 244, g: 244, b: 244 };
+    });
+
+    const contourImageData = createImageData(contourWidth, contourHeight, (x, y) => {
+      const dx = x - 96;
+      const dy = y - 100;
+      const value = ((dx * dx) / (56 * 56)) + ((dy * dy) / (72 * 72));
+      const blackOutline = value >= 0.96 && value <= 1.02;
+      const brownInnerLine = x >= 96 && x <= 99 && y >= 70 && y <= 128;
+
+      if (blackOutline) return { r: 18, g: 18, b: 18 };
+      if (brownInnerLine) return { r: 98, g: 72, b: 62 };
+      if (value < 1) return { r: 232, g: 191, b: 156 };
+      return { r: 244, g: 244, b: 244 };
+    });
+
+    const result = processImageToGrid(
+      baseImage,
+      width,
+      height,
+      realPalette,
+      { mode: 'ink-outline-fill' as never, contourImageData } as ProcessImageOptions,
+    );
+
+    let contourHits = 0;
+    for (let y = 14; y <= 36; y++) {
+      for (const x of [10, 11, 37, 38]) {
+        const cell = result[y][x];
+        if (cell && cell.rgb.r <= 70 && cell.rgb.g <= 70 && cell.rgb.b <= 70) {
+          contourHits++;
+        }
+      }
+    }
+
+    let innerBrownLineDarkHits = 0;
+    for (let y = 18; y <= 32; y++) {
+      const cell = result[y][25];
+      if (cell && cell.rgb.r <= 70 && cell.rgb.g <= 70 && cell.rgb.b <= 70) {
+        innerBrownLineDarkHits++;
+      }
+    }
+
+    expect(contourHits).toBeGreaterThanOrEqual(10);
+    expect(innerBrownLineDarkHits).toBeLessThanOrEqual(1);
+  });
+
+  it('ink-outline-fill contourThreshold should control outline sensitivity', () => {
+    const width = 50;
+    const height = 50;
+    const contourWidth = 200;
+    const contourHeight = 200;
+
+    const baseImage = createImageData(width, height, (x, y) => {
+      const dx = x - 24;
+      const dy = y - 25;
+      const inside = ((dx * dx) / (14 * 14)) + ((dy * dy) / (17 * 17)) <= 1;
+      if (inside) {
+        return { r: 232, g: 191, b: 156 };
+      }
+      return { r: 244, g: 244, b: 244 };
+    });
+
+    const contourImageData = createImageData(contourWidth, contourHeight, (x, y) => {
+      const dx = x - 96;
+      const dy = y - 100;
+      const value = ((dx * dx) / (56 * 56)) + ((dy * dy) / (72 * 72));
+      const softDarkOutline = value >= 0.97 && value <= 1.03;
+      if (softDarkOutline) return { r: 92, g: 82, b: 76 };
+      if (value < 1) return { r: 232, g: 191, b: 156 };
+      return { r: 244, g: 244, b: 244 };
+    });
+
+    const lowThreshold = processImageToGrid(
+      baseImage,
+      width,
+      height,
+      realPalette,
+      { mode: 'ink-outline-fill' as never, contourImageData, contourThreshold: 10 } as ProcessImageOptions,
+    );
+    const highThreshold = processImageToGrid(
+      baseImage,
+      width,
+      height,
+      realPalette,
+      { mode: 'ink-outline-fill' as never, contourImageData, contourThreshold: 90 } as ProcessImageOptions,
+    );
+
+    const countDarkPixels = (cells: ReturnType<typeof processImageToGrid>) => {
+      let total = 0;
+      for (let y = 10; y <= 40; y++) {
+        for (let x = 8; x <= 40; x++) {
+          const cell = cells[y][x];
+          if (cell && cell.rgb.r <= 70 && cell.rgb.g <= 70 && cell.rgb.b <= 70) {
+            total++;
+          }
+        }
+      }
+      return total;
+    };
+
+    expect(countDarkPixels(highThreshold)).toBeGreaterThan(countDarkPixels(lowThreshold));
+  });
 });

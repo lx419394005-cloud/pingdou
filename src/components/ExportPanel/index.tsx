@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GridState } from '../../types';
 import { buildColorLabelMap, buildIndexedPalette, getDisplayCode } from '../../utils/pattern';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
-import { BRAND_EXPORT_PREFIX, BRAND_SHORT_NAME } from '../../config/brand';
+import { BRAND_EXPORT_PREFIX } from '../../config/brand';
 
 interface ExportPanelProps {
   gridState: GridState;
@@ -187,7 +187,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
       return;
     }
 
-    void renderPreview(previewMode);
+    const previewTimer = window.setTimeout(() => {
+      void renderPreview(previewMode);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(previewTimer);
+    };
   }, [gridState.cells, gridState.config.height, gridState.config.width, isMenuOpen, previewMode, renderPreview]);
 
   const exportPattern = async (mode: ExportMode, label: string) => {
@@ -235,16 +241,6 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
 
   return (
     <div className="rounded-[28px] border border-[#eadfd0] bg-white p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-black text-gray-800">{BRAND_SHORT_NAME}出图</h3>
-          <p className="text-xs text-gray-500">导出完整图纸、编号图例和备料清单，便于直接开做</p>
-        </div>
-        <span className="rounded-full bg-teal-50 px-2 py-1 text-[10px] font-bold text-teal-700">
-          {gridState.config.width} × {gridState.config.height}
-        </span>
-      </div>
-
       {!compact && (
         <div className="mb-4 grid grid-cols-2 gap-3 rounded-2xl border border-gray-100 bg-gray-50 p-3">
         <div>
@@ -299,8 +295,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
           >
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h4 className="text-lg font-black text-gray-900">选择导出类型</h4>
-                <p className="text-xs text-gray-500">先选你要导出的图纸类型，支持分项导出和全部导出。</p>
+                <h4 className="text-lg font-black text-gray-900">导出图纸</h4>
               </div>
               <button
                 type="button"
@@ -313,13 +308,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ gridState, compact = f
 
             <div className="mb-4 rounded-2xl border border-[#eadfd0] bg-[#faf6ef] p-3">
               <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-xs font-black text-gray-700">导出预览</h4>
+                <h4 className="text-xs font-black text-gray-700">预览</h4>
                 <button
                   type="button"
                   onClick={() => void renderPreview(previewMode)}
                   className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 transition hover:bg-gray-50"
                 >
-                  刷新预览
+                  刷新
                 </button>
               </div>
 

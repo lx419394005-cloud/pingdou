@@ -30,6 +30,16 @@ describe('GridEditor', () => {
         previewPoints: [],
         previewColor: null,
         drawMode: 'paint',
+        colorAdjustment: {
+          enabled: true,
+          targetColorMode: 'manual',
+          recommendedTargetColors: 6,
+          selectedTargetColors: 7,
+          minTargetColors: 4,
+          maxTargetColors: 12,
+          onApplyAuto: () => {},
+          onApplyManual: () => {},
+        },
         onDrawModeChange: () => {},
         onCellMouseDown: () => {},
         onCellMouseEnter: () => {},
@@ -166,5 +176,41 @@ describe('GridEditor', () => {
 
     expect(html).toContain('min-w-0 flex-1 text-[10px] font-medium leading-5 text-gray-500');
     expect(html).not.toContain('whitespace-nowrap text-[10px] font-medium text-gray-500');
+  });
+
+  it('renders a global color-adjustment icon in the editor toolbar with an upward popover shell', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GridEditor, {
+        gridState,
+        hoverLayerPreview: [],
+        selectionPoints: [],
+        viewMode: 'color',
+        overlayImage: null,
+        overlayOpacity: 0.5,
+        previewPoints: [],
+        previewColor: null,
+        drawMode: 'paint',
+        colorAdjustment: {
+          enabled: true,
+          targetColorMode: 'manual',
+          recommendedTargetColors: 6,
+          selectedTargetColors: 7,
+          minTargetColors: 4,
+          maxTargetColors: 12,
+          onApplyAuto: () => {},
+          onApplyManual: () => {},
+        },
+        onDrawModeChange: () => {},
+        onCellMouseDown: () => {},
+        onCellMouseEnter: () => {},
+        onGlobalMouseUp: () => {},
+        onSelectColor: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="打开颜色调节"');
+    expect(html).toContain('颜色调节');
+    expect(html).toContain('4 - 12 色');
+    expect(html).toContain('absolute bottom-full right-0 z-50');
   });
 });
