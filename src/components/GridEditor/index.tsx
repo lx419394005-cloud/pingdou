@@ -1175,7 +1175,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       onMouseLeave={onGlobalMouseUp}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative h-full min-h-0">
         <div
           ref={viewportRef}
           onMouseDown={handleViewportMouseDown}
