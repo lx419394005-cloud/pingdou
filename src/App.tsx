@@ -1289,6 +1289,7 @@ function App() {
                   onGridLoaded={handleGridLoaded}
                   variant="modal"
                   initialImageFile={pendingImportFile}
+                  initialPreviewImageUrl={pendingImportFile ? null : importPreviewImage}
                   onRequestImageFile={requestImportImage}
                   enableExperimentalModes
                   defaultAlgorithmMode="legacy-clean"

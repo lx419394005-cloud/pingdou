@@ -30,12 +30,13 @@ import {
   type ToolButtonId,
 } from './config';
 
-interface ImageProcessorProps {
+ interface ImageProcessorProps {
   palette: Color[] | null;
   targetConfig: GridConfig;
   onGridLoaded: (cells: GridCell[][], width: number, height: number, overlayImage: string | null) => void;
   variant?: 'panel' | 'modal';
   initialImageFile?: File | null;
+  initialPreviewImageUrl?: string | null;
   onRequestImageFile?: () => void;
   enableExperimentalModes?: boolean;
   defaultAlgorithmMode?: AlgorithmMode;
@@ -493,6 +494,7 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   onGridLoaded,
   variant = 'panel',
   initialImageFile = null,
+  initialPreviewImageUrl = null,
   onRequestImageFile,
   enableExperimentalModes = false,
   defaultAlgorithmMode = 'legacy-clean',
@@ -1191,6 +1193,45 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
 
     return () => window.clearTimeout(timer);
   }, [initialImageFile, loadImageFile]);
+
+  useEffect(() => {
+    if (!initialPreviewImageUrl) {
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      const bounds = findOpaqueBounds(imageData);
+      const expandedBounds = bounds ? expandBounds(bounds, 12, img.width, img.height) : bounds;
+      const fitted = getFittedTransform(expandedBounds, cropRect, img.width, img.height);
+
+      setSourceName('参考图');
+      setSubjectBounds(expandedBounds);
+      setImage(img);
+      setCropBox(getInitialFreeCropBox(img.width, img.height, expandedBounds));
+      sourceImageDataRef.current = cloneImageData(imageData);
+      setScale(clampImportScale(fitted.scale));
+      setOffset(fitted.offset);
+      setEditMode('crop');
+      setTargetColorMode('auto');
+      setManualTargetColors(6);
+      setRecommendedTargetColors(6);
+      resetEditHistory();
+    };
+    img.onerror = () => {
+    };
+    img.src = initialPreviewImageUrl;
+  }, [initialPreviewImageUrl, cropRect, resetEditHistory]);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
