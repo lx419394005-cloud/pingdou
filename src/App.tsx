@@ -1075,43 +1075,59 @@ function App() {
 
                     {drawMode === 'pick' && (
                       <div className="mb-3 rounded-2xl bg-white p-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">取色源</div>
-                            <div className="mt-0.5 text-xs font-black text-gray-800">选择取色工具的颜色来源</div>
-                          </div>
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-[10px] font-bold tracking-[0.2em] text-gray-400">取色源</div>
                           {overlayImage && (
                             <div className="flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => setPickSource('current')}
-                                className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition ${
+                                className={`group relative inline-flex h-7 items-center justify-center rounded-xl px-2 transition ${
                                   pickSource === 'current'
                                     ? 'bg-teal-600 text-white'
-                                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                    : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
                                 }`}
+                                title="从当前画布颜色取色"
                               >
-                                当前
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="3" y="3" width="7" height="7" />
+                                  <rect x="14" y="3" width="7" height="7" />
+                                  <rect x="14" y="14" width="7" height="7" />
+                                  <rect x="3" y="14" width="7" height="7" />
+                                </svg>
+                                <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100">
+                                  当前颜色
+                                </span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setPickSource('overlay')}
-                                className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition ${
+                                className={`group relative inline-flex h-7 items-center justify-center rounded-xl px-2 transition ${
                                   pickSource === 'overlay'
                                     ? 'bg-teal-600 text-white'
-                                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                    : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
                                 }`}
+                                title="从参考图取色"
                               >
-                                底图
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M6 7a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H8a2 2 0 01-2-2z" />
+                                  <path d="M8 3h8a2 2 0 012 2v1" />
+                                </svg>
+                                <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-1.5 py-1 text-[10px] font-semibold text-white opacity-0 shadow transition-opacity group-hover:opacity-100">
+                                  参考底图
+                                </span>
                               </button>
                             </div>
                           )}
                         </div>
-                        <p className="mt-2 text-[11px] leading-5 text-gray-500">
-                          {pickSource === 'current'
-                            ? '从画布上已有的像素颜色取色'
-                            : '从参考图（临摹模式）取色，使用 Lab 颜色空间精准匹配'}
-                        </p>
+                        <div className="text-xs font-black text-gray-800">
+                          {pickSource === 'current' ? '当前颜色' : '参考底图'}
+                        </div>
+                        {!overlayImage && (
+                          <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                            导入参考图后可使用底图取色模式
+                          </p>
+                        )}
                       </div>
                     )}
 
