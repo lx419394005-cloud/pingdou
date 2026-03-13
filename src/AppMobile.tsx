@@ -405,24 +405,6 @@ export default function AppMobile() {
 
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-gray-100 via-gray-50 to-orange-50 flex flex-col overflow-hidden safe-area-inset">
-      {/* 状态栏 */}
-      <div>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FF6B6B] to-[#FF8E8E] flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-sm">{BRAND_SHORT_NAME}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[14px] text-gray-500">9:41</span>
-          <div className="w-5 h-5">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <rect x="2" y="7" width="16" height="10" rx="2" />
-              <rect x="20" y="11" width="2" height="2" />
-            </svg>
-          </div>
-        </div>
-      </div>
-
       {/* 顶部工具栏 */}
       <div className="flex items-center justify-between h-14 px-4 bg-white/60 backdrop-blur-sm border-b border-gray-200/50">
         <div className="flex items-center gap-2">
