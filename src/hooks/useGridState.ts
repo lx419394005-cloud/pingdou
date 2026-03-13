@@ -471,6 +471,8 @@ export const useGridState = () => {
     commitHistoryIfChanged,
     drawMode,
     mirrorMode,
+    pushHistory,
+    replaceGrid,
     resolveWorkingColor,
     selectedColor,
     setDrawMode,

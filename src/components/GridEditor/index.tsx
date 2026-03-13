@@ -7,7 +7,6 @@ import {
   getTouchDistance,
   getTouchMidpoint,
   shouldStartViewportPanning,
-  stepZoom,
 } from '../../utils/gridZoom';
 import { getPatternCellTextStyle, getPatternGridLineStyle, getPatternNumberCellStyle } from '../../utils/patternCanvas';
 
@@ -760,8 +759,6 @@ export const GridEditor: React.FC<GridEditorProps> = ({
     }
   };
 
-  const zoomLabel = `${Math.round(zoom * 100)}%`;
-
   const handleViewportWheel = useCallback((event: WheelEvent) => {
     const viewport = viewportRef.current;
     if (!viewport) {
@@ -1183,12 +1180,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
 
   return (
     <div
-      className="grid h-full w-full grid-rows-[minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-[28px] border border-[#eadfd0] bg-white p-3"
+      className={`flex h-full w-full flex-col overflow-hidden`}
       onMouseUp={onGlobalMouseUp}
       onMouseLeave={onGlobalMouseUp}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="relative h-full min-h-0">
+      <div className="relative h-full min-h-0 flex-1">
         <div
           ref={viewportRef}
           onMouseDown={handleViewportMouseDown}
@@ -1198,7 +1195,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
           onPointerMove={handleViewportPointerMove}
           onPointerUp={handleViewportPointerUp}
           onPointerCancel={handleViewportPointerUp}
-          className="absolute inset-0 overflow-auto rounded-[24px] border border-[#e7dcc9] bg-[#f5efe6] p-3 custom-scrollbar"
+          className={`h-full w-full overflow-auto custom-scrollbar`}
           style={{ scrollbarGutter: 'stable both-edges', touchAction: 'none' }}
         >
           <div className="relative h-max w-max">
@@ -1206,7 +1203,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
               ref={canvasRef}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
-              className="block rounded-2xl border border-[#dbc8b0] bg-white"
+              className="block"
               style={{
                 imageRendering: 'pixelated',
                 cursor: canvasCursor,
@@ -1215,40 +1212,13 @@ export const GridEditor: React.FC<GridEditorProps> = ({
             />
           </div>
         </div>
-        <div className="pointer-events-none absolute bottom-3 right-3 z-20">
-          <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-[#e7dcc9] bg-white/96 px-2 py-1 shadow-sm backdrop-blur">
-            <button
-              type="button"
-              onClick={() => {
-                updateFreePanOffset({ x: 0, y: 0 });
-                setManualZoom((current) => stepZoom(current ?? fitZoom, 'out'));
-              }}
-              className="rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-black text-gray-700 transition hover:bg-gray-50"
-              title="缩小"
-            >
-              -
-            </button>
-            <div className="min-w-10 text-center text-[11px] font-black text-gray-700">{zoomLabel}</div>
-            <button
-              type="button"
-              onClick={() => {
-                updateFreePanOffset({ x: 0, y: 0 });
-                setManualZoom((current) => stepZoom(current ?? fitZoom, 'in'));
-              }}
-              className="rounded-md border border-gray-200 px-1.5 py-0.5 text-xs font-black text-gray-700 transition hover:bg-gray-50"
-              title="放大"
-            >
-              +
-            </button>
-          </div>
-        </div>
       </div>
-      <div className="grid gap-2 rounded-[22px] border border-[#eadfd0] bg-[#faf6ef]/96 px-3 py-2.5 backdrop-blur-sm">
+      <div className="hidden md:grid gap-2 rounded-[22px] border border-[#eadfd0] bg-[#faf6ef]/96 px-3 py-2.5 backdrop-blur-sm">
         <div
-          className="-mb-6 overflow-x-auto pb-6 no-scrollbar"
-          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
-        >
-          <div className="flex w-max items-center gap-2 pr-1">
+            className="-mb-6 overflow-x-auto pb-6 no-scrollbar"
+            style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
+          >
+            <div className="flex w-max items-center gap-2 pr-1">
             {TOOL_GROUPS.map((group) => (
               <div key={group.id} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-[#eadfd0] bg-white/70 px-1.5 py-1">
                 <span className="rounded-md bg-[#f4efe5] px-1.5 py-0.5 text-[9px] font-black tracking-[0.08em] text-gray-500">

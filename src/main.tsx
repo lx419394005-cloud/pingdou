@@ -1,7 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import React from 'react';
 import './index.css';
 import App from './App.tsx';
+import AppMobile from './AppMobile.tsx';
 
 const blockBrowserZoom = () => {
   const shouldBlockZoomKey = (event: KeyboardEvent) => {
@@ -39,8 +41,23 @@ const blockBrowserZoom = () => {
 
 blockBrowserZoom();
 
+// 根据屏幕宽度判断是否使用移动端布局
+const isMobile = () => window.innerWidth <= 768;
+
+const AppWrapper = () => {
+  const [isMobileView, setIsMobileView] = React.useState(isMobile());
+
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileView(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return isMobileView ? <AppMobile /> : <App />;
+};
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AppWrapper />
   </StrictMode>,
 );
