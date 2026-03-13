@@ -619,6 +619,84 @@ export const expandBounds = (
   };
 };
 
+/**
+ * 为 ImageData 添加黑色描边效果
+ * 检测透明与非透明的边界，在边界外侧绘制黑色像素
+ */
+export const applyBlackOutlineToImageData = (
+  imageData: ImageData,
+  thickness: number = 1,
+): ImageData => {
+  const { width, height, data } = imageData;
+  const result = new Uint8ClampedArray(data);
+
+  // 创建透明度掩码
+  const alphaMask = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    alphaMask[i] = data[i * 4 + 3] >= 128 ? 1 : 0;
+  }
+
+  // 收集描边像素
+  const outlinePixels = new Set<number>();
+
+  // 遍历所有像素，找到边界像素
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+
+      // 只处理非透明像素
+      if (alphaMask[idx] === 0) continue;
+
+      // 检查 8 邻域
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+
+          const nx = x + dx;
+          const ny = y + dy;
+
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+
+          const nIdx = ny * width + nx;
+
+          // 如果邻居是透明的，当前像素是边界像素
+          if (alphaMask[nIdx] === 0) {
+            // 根据粗细向外扩散描边
+            for (let t = 0; t < thickness; t++) {
+              for (let tdy = -t - 1; tdy <= t + 1; tdy++) {
+                for (let tdx = -t - 1; tdx <= t + 1; tdx++) {
+                  if (Math.abs(tdx) !== t + 1 && Math.abs(tdy) !== t + 1) continue;
+
+                  const onx = x + tdx;
+                  const ony = y + tdy;
+
+                  if (onx >= 0 && ony >= 0 && onx < width && ony < height) {
+                    const onIdx = ony * width + onx;
+                    if (alphaMask[onIdx] === 0) {
+                      outlinePixels.add(onIdx);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 应用黑色描边
+  for (const pixelIdx of outlinePixels) {
+    const idx = pixelIdx * 4;
+    result[idx] = 0;         // R
+    result[idx + 1] = 0;     // G
+    result[idx + 2] = 0;     // B
+    result[idx + 3] = 255;   // A (完全不透明)
+  }
+
+  return new ImageData(result, width, height);
+};
+
 export const computeCropSourceRect = (
   cropRect: PreviewCropRect,
   offset: { x: number; y: number },

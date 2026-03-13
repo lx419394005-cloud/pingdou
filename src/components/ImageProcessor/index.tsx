@@ -5,6 +5,7 @@ import {
   MAX_TARGET_COLORS,
   MIN_TARGET_COLORS,
   processImageToGrid,
+  countUniqueColorsInGrid,
 } from '../../algorithms/kMeans';
 import {
   applySeededCutout,
@@ -50,8 +51,13 @@ import {
     selectedTargetColors: number;
     minTargetColors: number;
     maxTargetColors: number;
+    actualUsedColors: number;
     applyAutoTargetColors: () => void;
     applyManualTargetColors: (value: number) => void;
+    applyOutline: (value: boolean) => void;
+    applyOutlineThickness: (value: number) => void;
+    applyOutlineState: boolean;
+    outlineThicknessState: number;
   }) => void;
   onStatusChange?: (status: {
     sourceName: string | null;
@@ -531,6 +537,9 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   const [manualTargetColors, setManualTargetColors] = useState(6);
   const [workingResolution, setWorkingResolution] = useState(defaultWorkingResolution);
   const [contourThreshold, setContourThreshold] = useState(50);
+  const [applyOutline, setApplyOutline] = useState(false);
+  const [outlineThickness, setOutlineThickness] = useState(1);
+  const [actualUsedColors, setActualUsedColors] = useState(0);
 
   const cropRect = useMemo(
     () => getCropRect(targetConfig.width, targetConfig.height),
@@ -849,15 +858,24 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     }
 
     const resolvedMode = options?.targetColorModeOverride ?? targetColorMode;
+    // 对于 legacy-nearest 模式，auto 模式下不限制颜色数量，使用完整调色板追求最还原效果
+    // 其他模式或其他模式下，使用推荐或手动设置的颜色数量
+    const shouldLimitColors = algorithmMode !== 'legacy-nearest' || resolvedMode === 'manual';
     const resolvedTargetColors = options?.targetColorsOverride
-      ?? (resolvedMode === 'auto' ? recommendedTargetColors : manualTargetColors);
+      ?? (shouldLimitColors ? (resolvedMode === 'auto' ? recommendedTargetColors : manualTargetColors) : palette.length);
     const grid = processImageToGrid(imageData, targetConfig.width, targetConfig.height, palette, {
       mode: algorithmMode,
       contourImageData,
       targetColors: resolvedTargetColors,
       workingResolution,
       contourThreshold,
+      applyOutline: algorithmMode === 'black-outline' ? true : applyOutline,
+      outlineThickness,
     });
+
+    // 计算实际使用的颜色数量
+    const uniqueColors = countUniqueColorsInGrid(grid);
+    setActualUsedColors(uniqueColors);
 
     const tracingCanvas = document.createElement('canvas');
     const traceWidth = Math.min(TRACE_OVERLAY_MAX_SIZE, targetConfig.width * TRACE_OVERLAY_SCALE);
@@ -871,11 +889,13 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
     }
   }, [
     algorithmMode,
+    applyOutline,
     contourThreshold,
     image,
     manualTargetColors,
     onGridLoaded,
     onProcessed,
+    outlineThickness,
     palette,
     recommendedTargetColors,
     renderToCanvas,
@@ -899,14 +919,32 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
   }, [processGrid, recommendedTargetColors]);
 
   const applyManualTargetColors = useCallback((value: number) => {
-    const clampedValue = clamp(value, MIN_TARGET_COLORS, MAX_TARGET_COLORS);
+    // 当使用 legacy-nearest 模式时，允许目标颜色数量超过 MAX_TARGET_COLORS
+    const maxColors = algorithmMode === 'legacy-nearest' ? Math.max(actualUsedColors, MIN_TARGET_COLORS) : MAX_TARGET_COLORS;
+    const clampedValue = clamp(value, MIN_TARGET_COLORS, maxColors);
     setTargetColorMode('manual');
     setManualTargetColors(clampedValue);
     processGrid({
       targetColorsOverride: clampedValue,
       targetColorModeOverride: 'manual',
     });
-  }, [processGrid]);
+  }, [processGrid, algorithmMode, actualUsedColors]);
+
+  const handleApplyOutline = useCallback((value: boolean) => {
+    setApplyOutline(value);
+    processGrid({
+      targetColorModeOverride: targetColorMode,
+      targetColorsOverride: targetColorMode === 'auto' ? recommendedTargetColors : manualTargetColors,
+    });
+  }, [processGrid, targetColorMode, recommendedTargetColors, manualTargetColors]);
+
+  const handleApplyOutlineThickness = useCallback((value: number) => {
+    setOutlineThickness(value);
+    processGrid({
+      targetColorModeOverride: targetColorMode,
+      targetColorsOverride: targetColorMode === 'auto' ? recommendedTargetColors : manualTargetColors,
+    });
+  }, [processGrid, targetColorMode, recommendedTargetColors, manualTargetColors]);
 
   const handleClear = useCallback(() => {
     setImage(null);
@@ -1116,18 +1154,29 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
       recommendedTargetColors,
       selectedTargetColors: targetColorMode === 'auto' ? recommendedTargetColors : manualTargetColors,
       minTargetColors: MIN_TARGET_COLORS,
-      maxTargetColors: MAX_TARGET_COLORS,
+      maxTargetColors: algorithmMode === 'legacy-nearest' ? Math.max(actualUsedColors, MIN_TARGET_COLORS) : MAX_TARGET_COLORS,
+      actualUsedColors,
       applyAutoTargetColors,
       applyManualTargetColors,
+      applyOutline: handleApplyOutline,
+      applyOutlineThickness: handleApplyOutlineThickness,
+      applyOutlineState: applyOutline,
+      outlineThicknessState: outlineThickness,
     });
   }, [
     applyAutoTargetColors,
     applyManualTargetColors,
+    applyOutline,
+    handleApplyOutline,
+    handleApplyOutlineThickness,
     image,
     manualTargetColors,
     onColorControlsChange,
+    outlineThickness,
     recommendedTargetColors,
     targetColorMode,
+    algorithmMode,
+    actualUsedColors,
   ]);
 
   useEffect(() => {
@@ -1707,11 +1756,12 @@ export const ImageProcessor: React.FC<ImageProcessorProps> = ({
                         onChange={(event) => setAlgorithmMode(event.target.value as AlgorithmMode)}
                         className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-orange-300"
                       >
-                        {enableExperimentalModes && <option value="ink-outline-fill">黑线稿填色（实验）</option>}
-                        {enableExperimentalModes && <option value="contour-locked">轮廓锁定（多尺度）</option>}
-                        {enableExperimentalModes && <option value="legacy-guided">细节引导</option>}
-                        <option value="legacy-clean">主体清理优先</option>
                         <option value="legacy-nearest">最近色直出</option>
+                        {enableExperimentalModes && <option value="legacy-clean">主体清理优先</option>}
+                        {enableExperimentalModes && <option value="legacy-guided">细节引导</option>}
+                        {enableExperimentalModes && <option value="contour-locked">轮廓锁定（多尺度）</option>}
+                        {enableExperimentalModes && <option value="ink-outline-fill">黑线稿填色（实验）</option>}
+                        {enableExperimentalModes && <option value="black-outline">黑色描边</option>}
                       </select>
                     </div>
                   </div>

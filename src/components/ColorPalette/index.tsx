@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { Color, ColorPalette as ColorPaletteType } from '../../types';
+import type { Color, ColorPalette as ColorPaletteType, GridCell } from '../../types';
 import { detectColorGrid, extractColorsFromCanvas } from '../../algorithms/colorExtractor';
 
 interface ColorPaletteProps {
@@ -8,6 +8,8 @@ interface ColorPaletteProps {
   onSelectColor: (color: Color) => void;
   onPaletteLoad: (palette: ColorPaletteType) => void;
   compact?: boolean;
+  usedColors?: Color[];
+  gridCells?: GridCell[][] | null;
 }
 
 export const ColorPalette: React.FC<ColorPaletteProps> = ({
@@ -16,10 +18,30 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
   onSelectColor,
   onPaletteLoad,
   compact = false,
+  usedColors = [],
+  gridCells,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // 从 grid cells 中提取实际使用的颜色
+  const actualUsedColors = useMemo(() => {
+    if (!gridCells || !palette) {
+      return [];
+    }
+    const colorMap = new Map<string, Color>();
+    for (const row of gridCells) {
+      for (const cell of row) {
+        if (cell && palette.colors.some((c) => c.hex === cell.hex)) {
+          colorMap.set(cell.hex, cell);
+        }
+      }
+    }
+    return Array.from(colorMap.values());
+  }, [gridCells, palette]);
+
+  const colorsToDisplay = actualUsedColors.length > 0 ? actualUsedColors : usedColors;
 
   const handleJsonImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,6 +168,41 @@ export const ColorPalette: React.FC<ColorPaletteProps> = ({
               <p className="truncate text-sm font-black text-gray-800">{selectedColor.name}</p>
               <p className="text-xs font-medium text-gray-500">{selectedColor.hex}</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {colorsToDisplay.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-teal-100 bg-teal-50/50 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] font-bold tracking-[0.15em] text-teal-700">当前使用颜色</span>
+            <span className="text-[10px] font-black text-teal-600">{colorsToDisplay.length} 色</span>
+          </div>
+          <div className="grid grid-cols-8 gap-1.5">
+            {colorsToDisplay.map((color, index) => {
+              const { r, g, b } = color.rgb;
+              const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+              const textColor = brightness > 128 ? '#000000' : '#FFFFFF';
+
+              return (
+                <button
+                  key={index}
+                  onClick={() => onSelectColor(color)}
+                  className={`group relative aspect-square rounded-lg border transition-all hover:scale-110 ${
+                    selectedColor?.hex === color.hex ? 'border-orange-500 ring-2 ring-orange-200 scale-110 z-10' : 'border-gray-200'
+                  }`}
+                  style={{ backgroundColor: color.hex }}
+                  title={`${color.name}: ${color.hex}`}
+                >
+                  <span
+                    className="pointer-events-none text-[7px] font-black opacity-70"
+                    style={{ color: textColor }}
+                  >
+                    {color.name}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

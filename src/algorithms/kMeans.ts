@@ -1,5 +1,6 @@
 import type { AlgorithmMode, Color, GridCell, ProcessImageOptions } from '../types';
 import { deltaE, findNearestColor, rgbToLab, type LabColor } from '../utils/colorUtils';
+import { applyBlackOutlineToImageData } from '../utils/imageProcessing';
 import { extractFeatureMaps } from './featureExtraction';
 import { projectMosaicToGrid } from './gridProjection';
 import { buildRegionMosaic } from './regionMosaic';
@@ -630,6 +631,21 @@ export const estimateRecommendedColorLimit = (
   return Math.max(MIN_TARGET_COLORS, Math.min(8, recommendation));
 };
 
+/**
+ * 计算 grid 中实际使用的颜色数量
+ */
+export const countUniqueColorsInGrid = (grid: GridCell[][]): number => {
+  const colorSet = new Set<string>();
+  for (const row of grid) {
+    for (const cell of row) {
+      if (cell) {
+        colorSet.add(cell.hex);
+      }
+    }
+  }
+  return colorSet.size;
+};
+
 const createPointIndex = (points: PixelPoint[], width: number, height: number): Array<PixelPoint | null> => {
   const pointIndex = new Array<PixelPoint | null>(width * height).fill(null);
   for (const point of points) {
@@ -643,8 +659,47 @@ const legacyNearestProcess = (
   width: number,
   height: number,
   palette: Color[],
+  options?: ProcessImageOptions,
 ): GridCell[][] => {
+  const targetColors = options?.targetColors ?? palette.length;
+  const applyOutline = options?.applyOutline ?? false;
+  const outlineThickness = options?.outlineThickness ?? 1;
+
+  // 只有当 targetColors 小于调色板数量时，才限制颜色
+  // 默认情况下使用完整调色板，追求最还原的效果
+  const useLimitedPalette = targetColors < palette.length;
+
   const { data } = imageData;
+
+  // 如果需要限制颜色数量，先分析颜色频率
+  let effectivePalette = palette;
+  if (useLimitedPalette) {
+    const colorFrequency = new Map<string, { count: number; rgb: { r: number; g: number; b: number } }>();
+    let opaquePixels = 0;
+
+    for (let i = 0; i < width * height; i++) {
+      const idx = i * 4;
+      if (data[idx + 3] < 128) continue;
+      opaquePixels++;
+      const rgb = { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
+      const nearest = findNearestColor(rgb, palette);
+      const stat = colorFrequency.get(nearest.hex) ?? { count: 0, rgb: { r: 0, g: 0, b: 0 } };
+      stat.count++;
+      stat.rgb.r += rgb.r;
+      stat.rgb.g += rgb.g;
+      stat.rgb.b += rgb.b;
+      colorFrequency.set(nearest.hex, stat);
+    }
+
+    // 按频率排序，选择最常用的颜色
+    const sortedColors = Array.from(colorFrequency.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, Math.min(targetColors, palette.length))
+      .map((entry) => palette.find((c) => c.hex === entry[0])!);
+
+    effectivePalette = sortedColors.length > 0 ? sortedColors : palette;
+  }
+
   const grid = makeGrid(width, height);
   const isEdge = new Uint8Array(width * height);
 
@@ -669,7 +724,7 @@ const legacyNearestProcess = (
         grid[y][x] = null;
         continue;
       }
-      grid[y][x] = findNearestColor({ r: data[idx], g: data[idx + 1], b: data[idx + 2] }, palette);
+      grid[y][x] = findNearestColor({ r: data[idx], g: data[idx + 1], b: data[idx + 2] }, effectivePalette);
     }
   }
 
@@ -693,11 +748,53 @@ const legacyNearestProcess = (
 
       for (const [hex, count] of counts.entries()) {
         if (count >= 6 && current.hex !== hex) {
-          const replacement = palette.find((color) => color.hex === hex);
+          const replacement = effectivePalette.find((color) => color.hex === hex);
           if (replacement) {
             grid[y][x] = replacement;
           }
           break;
+        }
+      }
+    }
+  }
+
+  // 如果启用了黑色描边，应用描边效果
+  if (applyOutline && outlineThickness >= 1) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const cell = grid[y][x];
+        if (!cell) continue;
+
+        // 检查是否有透明邻居（边缘）或者基于梯度的边缘
+        let isEdgeCell = false;
+
+        // 检查透明邻居
+        for (let dy = -outlineThickness; dy <= outlineThickness; dy++) {
+          for (let dx = -outlineThickness; dx <= outlineThickness; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+              if (!grid[ny][nx]) {
+                isEdgeCell = true;
+                break;
+              }
+            } else {
+              // 边界外的单元格也视为透明
+              isEdgeCell = true;
+              break;
+            }
+          }
+          if (isEdgeCell) break;
+        }
+
+        // 如果没有透明邻居，检查是否是基于梯度的边缘
+        if (!isEdgeCell && isEdge[y * width + x] === 1) {
+          isEdgeCell = true;
+        }
+
+        if (isEdgeCell) {
+          grid[y][x] = { name: 'Black', hex: '#000000', rgb: { r: 0, g: 0, b: 0 } };
         }
       }
     }
@@ -1821,7 +1918,7 @@ export const processImageToGrid = (
 ): GridCell[][] => {
   const mode: AlgorithmMode = options?.mode ?? 'legacy-clean';
   if (mode === 'legacy-nearest') {
-    return legacyNearestProcess(imageData, width, height, palette);
+    return legacyNearestProcess(imageData, width, height, palette, options);
   }
   if (mode === 'legacy-clean') {
     return runLegacyClean(imageData, width, height, palette, options);
@@ -1835,7 +1932,79 @@ export const processImageToGrid = (
   if (mode === 'ink-outline-fill') {
     return runInkOutlineFill(imageData, width, height, palette, options);
   }
+  if (mode === 'black-outline') {
+    return runBlackOutline(imageData, width, height, palette, options);
+  }
   return runLegacyGuided(imageData, width, height, palette, options);
+};
+
+/**
+ * 黑色描边模式 - 先为图像添加黑色轮廓，然后进行填色处理
+ */
+const runBlackOutline = (
+  imageData: ImageData,
+  width: number,
+  height: number,
+  palette: Color[],
+  options?: ProcessImageOptions,
+): GridCell[][] => {
+  const targetColors = clampTargetColors(options?.targetColors ?? GUIDED_TOTAL_MAX_COLORS);
+  const applyOutline = options?.applyOutline ?? false;
+  const outlineThickness = options?.outlineThickness ?? 1;
+
+  // 根据选项决定是否应用黑色描边
+  const processedImageData = applyOutline
+    ? applyBlackOutlineToImageData(imageData, outlineThickness)
+    : imageData;
+
+  // 创建网格
+  const grid = makeGrid(width, height);
+  const { data } = processedImageData;
+
+  // 将图像数据转换为网格
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const alpha = data[idx + 3];
+
+      if (alpha < 128) {
+        grid[y][x] = null;
+        continue;
+      }
+
+      const rgb = { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
+
+      // 如果是黑色（描边部分），直接使用黑色
+      if (rgb.r < 50 && rgb.g < 50 && rgb.b < 50) {
+        grid[y][x] = {
+          name: 'Black',
+          hex: '#000000',
+          rgb: { r: 0, g: 0, b: 0 }
+        };
+      } else {
+        // 否则使用最近的颜色
+        grid[y][x] = findNearestColor(rgb, palette);
+      }
+    }
+  }
+
+  // 创建内部掩码（非黑色区域）
+  const interiorMask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const cell = grid[y][x];
+      if (cell && !(cell.rgb.r === 0 && cell.rgb.g === 0 && cell.rgb.b === 0)) {
+        interiorMask[idx] = 1;
+      }
+    }
+  }
+
+  // 压缩内部颜色
+  const fillTargetColors = applyOutline ? Math.max(1, targetColors - 1) : targetColors;
+  compressMaskedColors(grid, interiorMask, fillTargetColors, false);
+
+  return grid;
 };
 
 export const __testOnly = {

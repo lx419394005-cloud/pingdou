@@ -43,7 +43,7 @@ export default function AppMobile() {
   // UI 状态
   // 视图模式切换
   const [viewMode, setViewMode] = useState<EditorViewMode>('color');
-  const [overlayOpacity, setOverlayOpacity] = useState(0.55);
+  const [overlayOpacity, setOverlayOpacity] = useState<number>(0.55);
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
@@ -69,17 +69,6 @@ export default function AppMobile() {
   const [exportMode, setExportMode] = useState<'color' | 'number'>('number');
   const [exportPreviewDataUrl, setExportPreviewDataUrl] = useState<string | null>(null);
   const [isExportPreviewLoading, setIsExportPreviewLoading] = useState(false);
-
-  // 导入颜色控制状态
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [importColorControlState, setImportColorControlState] = useState({
-    hasImage: false,
-    targetColorMode: 'auto' as 'auto' | 'manual',
-    recommendedTargetColors: 6,
-    selectedTargetColors: 6,
-    minTargetColors: 5,
-    maxTargetColors: 12,
-  });
 
   const importColorActionsRef = useRef<{
     applyAutoTargetColors: () => void;
@@ -164,10 +153,10 @@ export default function AppMobile() {
           ctx.fillStyle = cell.hex;
           ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
 
-          if (mode === 'number' && cell.number) {
+          if (mode === 'number' && cell) {
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 10px sans-serif';
-            ctx.fillText(String(cell.number), cellX + CELL_SIZE / 2, cellY + CELL_SIZE / 2);
+            ctx.fillText(String(cell.name), cellX + CELL_SIZE / 2, cellY + CELL_SIZE / 2);
           }
         } else {
           ctx.fillStyle = '#ffffff';
@@ -229,12 +218,8 @@ export default function AppMobile() {
   const handleClearCanvas = useCallback(() => {
     // 清除画布：重置所有单元格
     if (window.confirm('确定要清除画布吗？此操作不可恢复。')) {
-      loadGridData({
-        width: gridState.config.width,
-        height: gridState.config.height,
-        cells: [],
-        palette: mardPalette as ColorPalette,
-      });
+      const emptyCells = Array(gridState.config.height).fill(null).map(() => Array(gridState.config.width).fill(null));
+      loadGridData(emptyCells, { width: gridState.config.width, height: gridState.config.height });
       setIsMenuModalOpen(false);
     }
   }, [gridState.config, loadGridData]);
@@ -260,14 +245,6 @@ export default function AppMobile() {
     applyAutoTargetColors: () => void;
     applyManualTargetColors: (value: number) => void;
   }) => {
-    setImportColorControlState({
-      hasImage: controls.hasImage,
-      targetColorMode: controls.targetColorMode,
-      recommendedTargetColors: controls.recommendedTargetColors,
-      selectedTargetColors: controls.selectedTargetColors,
-      minTargetColors: controls.minTargetColors,
-      maxTargetColors: controls.maxTargetColors,
-    });
     importColorActionsRef.current = {
       applyAutoTargetColors: controls.applyAutoTargetColors,
       applyManualTargetColors: controls.applyManualTargetColors,
@@ -849,7 +826,7 @@ export default function AppMobile() {
                     min="0"
                     max="100"
                     value={overlayOpacity * 100}
-                    onChange={(e) => setOverlayOpacity(e.target.value / 100)}
+                    onChange={(e) => setOverlayOpacity(Number(e.target.value) / 100)}
                     className="flex-1 h-2 bg-gray-200 rounded-full appearance-none accent-[#FF6B6B]"
                   />
                   <span className="text-xs font-semibold text-gray-900">100%</span>

@@ -226,8 +226,13 @@ interface GridEditorProps {
     selectedTargetColors: number;
     minTargetColors: number;
     maxTargetColors: number;
+    actualUsedColors: number;
+    applyOutline: boolean;
+    outlineThickness: number;
     onApplyAuto: () => void;
     onApplyManual: (value: number) => void;
+    onApplyOutline: (value: boolean) => void;
+    onApplyOutlineThickness: (value: number) => void;
   };
   onDrawModeChange: (mode: DrawMode) => void;
   onCellMouseDown: (x: number, y: number) => void;
@@ -285,6 +290,8 @@ export const GridEditor: React.FC<GridEditorProps> = ({
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [freePanOffset, setFreePanOffset] = useState({ x: 0, y: 0 });
   const [isColorPopoverOpen, setIsColorPopoverOpen] = useState(false);
+  const [tempTargetColors, setTempTargetColors] = useState<number | null>(null);
+  const [tempOutlineThickness, setTempOutlineThickness] = useState<number | null>(null);
   const colorPopoverRef = useRef<HTMLDivElement>(null);
   const isColorPopoverVisible = isColorPopoverOpen && Boolean(colorAdjustment?.enabled);
 
@@ -481,6 +488,13 @@ export const GridEditor: React.FC<GridEditorProps> = ({
       window.removeEventListener('keyup', onKeyUp);
     };
   }, []);
+
+  useEffect(() => {
+    if (isColorPopoverOpen && colorAdjustment?.enabled) {
+      setTempTargetColors(colorAdjustment.selectedTargetColors);
+      setTempOutlineThickness(colorAdjustment.outlineThickness);
+    }
+  }, [isColorPopoverOpen, colorAdjustment?.enabled, colorAdjustment?.selectedTargetColors, colorAdjustment?.outlineThickness]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1293,7 +1307,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                   </button>
 
                   <div
-                    className={`absolute bottom-full right-0 z-50 mb-2 w-[248px] rounded-2xl border border-[#e4d4be] bg-white/98 p-3 shadow-[0_20px_60px_rgba(83,52,24,0.18)] backdrop-blur transition ${
+                    className={`absolute bottom-full right-0 z-50 mb-2 w-[280px] rounded-2xl border border-[#e4d4be] bg-white/98 p-3 shadow-[0_20px_60px_rgba(83,52,24,0.18)] backdrop-blur transition ${
                       isColorPopoverVisible ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'
                     }`}
                   >
@@ -1303,7 +1317,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                         <div className="mt-1 text-xs font-black text-gray-800">全局重新试色数</div>
                       </div>
                       <div className="rounded-full bg-[#f6efe4] px-2 py-1 text-[10px] font-black text-[#8a5a24]">
-                        4 - 12 色
+                        {colorAdjustment.actualUsedColors > 0 ? `实际 ${colorAdjustment.actualUsedColors} 色` : `${colorAdjustment.minTargetColors} - ${colorAdjustment.maxTargetColors} 色`}
                       </div>
                     </div>
 
@@ -1311,9 +1325,12 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                       <button
                         type="button"
                         disabled={!colorAdjustment.enabled}
-                        onClick={colorAdjustment.onApplyAuto}
+                        onClick={() => {
+                          setTempTargetColors(colorAdjustment.recommendedTargetColors);
+                          setTempOutlineThickness(colorAdjustment.applyOutline ? colorAdjustment.outlineThickness : null);
+                        }}
                         className={`rounded-xl px-3 py-2 text-xs font-bold transition ${
-                          colorAdjustment.targetColorMode === 'auto'
+                          (tempTargetColors ?? colorAdjustment.selectedTargetColors) === colorAdjustment.recommendedTargetColors
                             ? 'bg-orange-500 text-white'
                             : 'border border-gray-200 bg-white text-gray-700'
                         } ${!colorAdjustment.enabled ? 'cursor-not-allowed opacity-45' : ''}`}
@@ -1328,7 +1345,7 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                     <div className="mt-3">
                       <div className="mb-1 flex items-center justify-between text-[11px] font-bold text-gray-500">
                         <span>手动颜色数</span>
-                        <span className="text-orange-700">{colorAdjustment.selectedTargetColors}</span>
+                        <span className="text-orange-700">{tempTargetColors ?? colorAdjustment.selectedTargetColors}</span>
                       </div>
                       <input
                         type="range"
@@ -1336,15 +1353,79 @@ export const GridEditor: React.FC<GridEditorProps> = ({
                         max={colorAdjustment.maxTargetColors}
                         step="1"
                         disabled={!colorAdjustment.enabled}
-                        value={colorAdjustment.selectedTargetColors}
-                        onChange={(event) => colorAdjustment.onApplyManual(Number.parseInt(event.target.value, 10))}
+                        value={tempTargetColors ?? colorAdjustment.selectedTargetColors}
+                        onChange={(event) => setTempTargetColors(Number.parseInt(event.target.value, 10))}
                         className="w-full accent-orange-500"
                       />
                     </div>
 
-                    <p className="mt-2 text-[11px] leading-5 text-gray-500">
+                    <div className="mt-4 border-t border-gray-100 pt-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-bold text-gray-500">黑色描边</div>
+                          <p className="text-[10px] leading-4 text-gray-400">为像素画添加黑色轮廓</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => colorAdjustment.onApplyOutline(!colorAdjustment.applyOutline)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                            colorAdjustment.applyOutline ? 'bg-orange-500' : 'bg-gray-300'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                              colorAdjustment.applyOutline ? 'translate-x-4' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      {colorAdjustment.applyOutline && (
+                        <div className="mt-2.5">
+                          <div className="mb-1 flex items-center justify-between text-[10px] font-bold text-gray-500">
+                            <span>描边粗细</span>
+                            <span className="text-orange-600">{tempOutlineThickness ?? colorAdjustment.outlineThickness}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="1"
+                            max="3"
+                            step="1"
+                            value={tempOutlineThickness ?? colorAdjustment.outlineThickness}
+                            onChange={(event) => setTempOutlineThickness(Number.parseInt(event.target.value, 10))}
+                            className="w-full accent-orange-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (tempTargetColors !== null) {
+                            colorAdjustment.onApplyManual(tempTargetColors);
+                          }
+                          if (tempOutlineThickness !== null && colorAdjustment.applyOutline) {
+                            colorAdjustment.onApplyOutlineThickness(tempOutlineThickness);
+                          }
+                          setIsColorPopoverOpen(false);
+                        }}
+                        className="flex-1 rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-orange-600"
+                      >
+                        确定
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsColorPopoverOpen(false)}
+                        className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                      >
+                        取消
+                      </button>
+                    </div>
+
+                    <p className="mt-3 text-[11px] leading-5 text-gray-500">
                       {colorAdjustment.enabled
-                        ? '拖动后会立刻重新生成当前图纸，方便直接对比不同颜色数效果。'
+                        ? '调整后点击确定才会重新生成当前图纸。'
                         : '先导入参考图并生成一次图纸，这里才会接管颜色调节。'}
                     </p>
                   </div>

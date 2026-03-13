@@ -56,7 +56,7 @@ export interface ProcessedImage {
   originalHeight: number;
 }
 
-export type AlgorithmMode = 'legacy-clean' | 'contour-locked' | 'legacy-guided' | 'legacy-nearest' | 'ink-outline-fill';
+export type AlgorithmMode = 'legacy-clean' | 'contour-locked' | 'legacy-guided' | 'legacy-nearest' | 'ink-outline-fill' | 'black-outline';
 
 export interface ProcessImageOptions {
   mode?: AlgorithmMode;
@@ -64,4 +64,6 @@ export interface ProcessImageOptions {
   targetColors?: number;
   workingResolution?: number;
   contourThreshold?: number;
+  applyOutline?: boolean;
+  outlineThickness?: number;
 }

@@ -44,6 +44,9 @@ type ImportColorControlState = {
   selectedTargetColors: number;
   minTargetColors: number;
   maxTargetColors: number;
+  actualUsedColors: number;
+  applyOutline: boolean;
+  outlineThickness: number;
 };
 
 const getColorTextColor = (color: Color | null) => {
@@ -161,10 +164,15 @@ function App() {
     selectedTargetColors: 6,
     minTargetColors: MIN_TARGET_COLORS,
     maxTargetColors: MAX_TARGET_COLORS,
+    actualUsedColors: 0,
+    applyOutline: false,
+    outlineThickness: 1,
   });
   const importColorActionsRef = useRef<{
     applyAutoTargetColors: () => void;
     applyManualTargetColors: (value: number) => void;
+    applyOutline: (value: boolean) => void;
+    applyOutlineThickness: (value: number) => void;
   } | null>(null);
   const [pickSource, setPickSource] = useState<'current' | 'overlay'>('overlay');
 
@@ -294,12 +302,19 @@ function App() {
     selectedTargetColors: number;
     minTargetColors: number;
     maxTargetColors: number;
+    actualUsedColors: number;
     applyAutoTargetColors: () => void;
     applyManualTargetColors: (value: number) => void;
+    applyOutline: (value: boolean) => void;
+    applyOutlineThickness: (value: number) => void;
+    applyOutlineState: boolean;
+    outlineThicknessState: number;
   }) => {
     importColorActionsRef.current = {
       applyAutoTargetColors: controls.applyAutoTargetColors,
       applyManualTargetColors: controls.applyManualTargetColors,
+      applyOutline: controls.applyOutline,
+      applyOutlineThickness: controls.applyOutlineThickness,
     };
 
     setImportColorControlState((current) => {
@@ -310,6 +325,9 @@ function App() {
         selectedTargetColors: controls.selectedTargetColors,
         minTargetColors: controls.minTargetColors,
         maxTargetColors: controls.maxTargetColors,
+        actualUsedColors: controls.actualUsedColors,
+        applyOutline: controls.applyOutlineState,
+        outlineThickness: controls.outlineThicknessState,
       };
 
       if (
@@ -319,6 +337,8 @@ function App() {
         && current.selectedTargetColors === next.selectedTargetColors
         && current.minTargetColors === next.minTargetColors
         && current.maxTargetColors === next.maxTargetColors
+        && current.applyOutline === next.applyOutline
+        && current.outlineThickness === next.outlineThickness
       ) {
         return current;
       }
@@ -500,6 +520,7 @@ function App() {
     if (importStatus.algorithmMode === 'legacy-guided') return '细节引导';
     if (importStatus.algorithmMode === 'contour-locked') return '轮廓锁定（多尺度）';
     if (importStatus.algorithmMode === 'ink-outline-fill') return '黑线稿填色（实验）';
+    if (importStatus.algorithmMode === 'black-outline') return '黑色描边';
     if (importStatus.algorithmMode === 'json-import') return 'JSON 坐标导入';
     return '主体清理优先';
   })();
@@ -940,11 +961,16 @@ function App() {
                     targetColorMode: importColorControlState.targetColorMode,
                     recommendedTargetColors: importColorControlState.recommendedTargetColors,
                     selectedTargetColors: importColorControlState.selectedTargetColors,
-                  minTargetColors: importColorControlState.minTargetColors,
-                  maxTargetColors: importColorControlState.maxTargetColors,
-                  onApplyAuto: () => importColorActionsRef.current?.applyAutoTargetColors(),
-                  onApplyManual: (value) => importColorActionsRef.current?.applyManualTargetColors(value),
-                }}
+                    minTargetColors: importColorControlState.minTargetColors,
+                    maxTargetColors: importColorControlState.maxTargetColors,
+                    actualUsedColors: importColorControlState.actualUsedColors,
+                    applyOutline: importColorControlState.applyOutline,
+                    outlineThickness: importColorControlState.outlineThickness,
+                    onApplyAuto: () => importColorActionsRef.current?.applyAutoTargetColors(),
+                    onApplyManual: (value) => importColorActionsRef.current?.applyManualTargetColors(value),
+                    onApplyOutline: (value) => importColorActionsRef.current?.applyOutline(value),
+                    onApplyOutlineThickness: (value) => importColorActionsRef.current?.applyOutlineThickness(value),
+                  }}
                 onDrawModeChange={setDrawMode}
                 onCellMouseDown={handleEditorMouseDown}
                 onCellMouseEnter={handleMouseEnter}
@@ -1297,6 +1323,7 @@ function App() {
                     onSelectColor={handleSelectDrawingColor}
                     onPaletteLoad={handlePaletteLoad}
                     compact
+                    gridCells={composedCells}
                   />
                 )}
               </div>
@@ -1414,7 +1441,7 @@ function App() {
                   initialPreviewImageUrl={pendingImportFile ? null : importPreviewImage}
                   onRequestImageFile={requestImportImage}
                   enableExperimentalModes
-                  defaultAlgorithmMode="legacy-clean"
+                  defaultAlgorithmMode="legacy-nearest"
                   onProcessed={() => setIsImportModalOpen(false)}
                   onPreviewChange={setImportPreviewImage}
                   onColorControlsChange={handleImportColorControlsChange}
