@@ -50,6 +50,7 @@ export default function AppMobile() {
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [showQuickColors, setShowQuickColors] = useState(true); // 默认显示
   const [isEditingQuickColors, setIsEditingQuickColors] = useState(false);
+  const [isToolsCollapsed, setIsToolsCollapsed] = useState(false);
   const [customQuickColors, setCustomQuickColors] = useState<number[]>([0, 1, 2, 3, 4, 5, 6, 7]);
   const [selectedEditSlot, setSelectedEditSlot] = useState<number | null>(null);
   const [projectName] = useState('我的新图纸');
@@ -671,62 +672,81 @@ export default function AppMobile() {
           </div>
         )}
 
-        {/* 工具栏 - 两排每排 4 个 */}
+        {/* 工具栏 - 单列可收起 */}
         <div className="px-4">
-          <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-4">
-            <div className="grid grid-cols-4 gap-3">
-              {TOOLS.map((tool) => {
-                const isActive =
-                  (tool.id === 'paint' && drawMode === 'paint') ||
-                  (tool.id === 'erase' && drawMode === 'erase') ||
-                  (tool.id === 'pick' && drawMode === 'pick') ||
-                  (tool.id === 'line' && drawMode === 'line') ||
-                  (tool.id === 'rect' && drawMode === 'rectangle') ||
-                  (tool.id === 'circle' && drawMode === 'ellipse') ||
-                  (tool.id === 'select-color' && selectedColorForFill !== null);
-
-                return (
-                  <button
-                    key={tool.id}
-                    onClick={() => handleToolClick(tool.id)}
-                    className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all ${
-                      isActive
-                        ? 'bg-gradient-to-br from-gray-800 to-gray-900 text-white shadow-lg scale-105'
-                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                        isActive ? 'bg-white/20' : ''
-                      }`}
-                      style={!isActive ? { backgroundColor: tool.color + '15' } : {}}
-                    >
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke={isActive ? '#fff' : tool.color} strokeWidth="2">
-                        {tool.icon === 'image-plus' && (
-                          <>
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <path d="M21 15l-5-5L5 21" />
-                          </>
-                        )}
-                        {tool.icon === 'paintbrush' && <path d="M18 12l-8.5 8.5a2.121 2.121 0 01-3 0l-2-2a2.121 2.121 0 010-3L12 7" />}
-                        {tool.icon === 'eraser' && (
-                          <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.8 1.6c.8-.8 2-.8 2.8 0l4.4 4.4c.8.8.8 2 0 2.8L11 20" />
-                        )}
-                        {tool.icon === 'pipette' && (
-                          <path d="M12 2L8 6m4-4l4 4M4 10l8-8 8 8c1.1 1.1 1.1 3 0 4.1L12 22 4 14.1c-1.1-1.1-1.1-3 0-4.1z" />
-                        )}
-                        {tool.icon === 'move-diagonal' && <path d="M5 5h6M5 5v6M5 5l10 10M19 19h-6M19 19v-6" />}
-                        {tool.icon === 'square' && <rect x="3" y="3" width="18" height="18" rx="2" />}
-                        {tool.icon === 'circle' && <circle cx="12" cy="12" r="9" />}
-                        {tool.icon === 'droplet' && <path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />}
-                      </svg>
-                    </div>
-                    <span className="text-[11px] font-medium">{tool.label}</span>
-                  </button>
-                );
-              })}
+          <div className="bg-white rounded-3xl shadow-lg border border-gray-100">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <span className="text-xs font-semibold text-gray-500">工具</span>
+              <button
+                onClick={() => setIsToolsCollapsed(!isToolsCollapsed)}
+                className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <svg
+                  className={`w-4 h-4 text-gray-500 transition-transform ${isToolsCollapsed ? 'rotate-180' : ''}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <polyline points="6,9 12,15 18,9" />
+                </svg>
+              </button>
             </div>
+            {!isToolsCollapsed && (
+              <div className="p-4 grid grid-cols-4 gap-3">
+                {TOOLS.map((tool) => {
+                  const isActive =
+                    (tool.id === 'paint' && drawMode === 'paint') ||
+                    (tool.id === 'erase' && drawMode === 'erase') ||
+                    (tool.id === 'pick' && drawMode === 'pick') ||
+                    (tool.id === 'line' && drawMode === 'line') ||
+                    (tool.id === 'rect' && drawMode === 'rectangle') ||
+                    (tool.id === 'circle' && drawMode === 'ellipse') ||
+                    (tool.id === 'select-color' && selectedColorForFill !== null);
+
+                  return (
+                    <button
+                      key={tool.id}
+                      onClick={() => handleToolClick(tool.id)}
+                      className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all ${
+                        isActive
+                          ? 'bg-gradient-to-br from-gray-800 to-gray-900 text-white shadow-lg scale-105'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          isActive ? 'bg-white/20' : ''
+                        }`}
+                        style={!isActive ? { backgroundColor: tool.color + '15' } : {}}
+                      >
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke={isActive ? '#fff' : tool.color} strokeWidth="2">
+                          {tool.icon === 'image-plus' && (
+                            <>
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <path d="M21 15l-5-5L5 21" />
+                            </>
+                          )}
+                          {tool.icon === 'paintbrush' && <path d="M18 12l-8.5 8.5a2.121 2.121 0 01-3 0l-2-2a2.121 2.121 0 010-3L12 7" />}
+                          {tool.icon === 'eraser' && (
+                            <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.8 1.6c.8-.8 2-.8 2.8 0l4.4 4.4c.8.8.8 2 0 2.8L11 20" />
+                          )}
+                          {tool.icon === 'pipette' && (
+                            <path d="M12 2L8 6m4-4l4 4M4 10l8-8 8 8c1.1 1.1 1.1 3 0 4.1L12 22 4 14.1c-1.1-1.1-1.1-3 0-4.1z" />
+                          )}
+                          {tool.icon === 'move-diagonal' && <path d="M5 5h6M5 5v6M5 5l10 10M19 19h-6M19 19v-6" />}
+                          {tool.icon === 'square' && <rect x="3" y="3" width="18" height="18" rx="2" />}
+                          {tool.icon === 'circle' && <circle cx="12" cy="12" r="9" />}
+                          {tool.icon === 'droplet' && <path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />}
+                        </svg>
+                      </div>
+                      <span className="text-[11px] font-medium">{tool.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
